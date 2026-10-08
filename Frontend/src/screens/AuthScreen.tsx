@@ -135,6 +135,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
                   value={firstName}
                   onChangeText={setFirstName}
                   autoCapitalize="words"
+                  autoCorrect={false}
+                  cursorColor={colors.primary}
+                  selectionColor={colors.primary}
                 />
               </View>
               <View style={styles.inputGroup}>
@@ -146,6 +149,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
                   value={lastName}
                   onChangeText={setLastName}
                   autoCapitalize="words"
+                  autoCorrect={false}
+                  cursorColor={colors.primary}
+                  selectionColor={colors.primary}
                 />
               </View>
             </>
@@ -162,6 +168,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              cursorColor={colors.primary}
+              selectionColor={colors.primary}
             />
           </View>
 
@@ -175,6 +183,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               onChangeText={setPassword}
               secureTextEntry
               autoCapitalize="none"
+              autoCorrect={false}
+              cursorColor={colors.primary}
+              selectionColor={colors.primary}
             />
           </View>
 
@@ -291,14 +302,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    ...typography.bodyLarge,
+    height: 52,
+    fontSize: 16,
+    fontWeight: '400',
     color: colors.onSurface,
+    textAlignVertical: 'center',
+    letterSpacing: 0,
   },
   submitButton: {
     backgroundColor: colors.primary,

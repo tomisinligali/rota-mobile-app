@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#6600CC"
@@ -17,6 +17,9 @@
       "adaptiveIcon": {
         "backgroundColor": "#6600CC"
       }
-    }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }

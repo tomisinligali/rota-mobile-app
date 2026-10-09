@@ -5,6 +5,7 @@ import authRoutes from './domains/auth/auth.routes';
 import dashboardRoutes from './domains/dashboard/dashboard.routes';
 import teamsRoutes from './domains/teams/teams.routes';
 import invitationsRoutes from './domains/invitations/invitations.routes';
+import shiftsRoutes from './domains/shifts/shifts.routes';
 import { pool } from './db/pool';
 
 dotenv.config();
@@ -44,6 +45,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/teams', teamsRoutes);
 app.use('/api/v1/invitations', invitationsRoutes);
+app.use('/api/v1/shifts', shiftsRoutes);
 
 // 404 Handler per PRD Envelope
 app.use((_req: Request, res: Response) => {

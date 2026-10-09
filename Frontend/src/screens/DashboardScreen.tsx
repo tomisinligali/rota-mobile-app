@@ -19,13 +19,21 @@ interface DashboardScreenProps {
   onLogout: () => void;
 }
 
+type TabType = 'schedule' | 'activity' | 'roster' | 'overview';
+
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, onLogout }) => {
+  const [activeTab, setActiveTab] = useState<TabType>('schedule');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [teams, setTeams] = useState<any[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [shifts, setShifts] = useState<any[]>([]);
+  const [activityItems, setActivityItems] = useState<any[]>([]);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityHasMore, setActivityHasMore] = useState(false);
+  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Modals
@@ -43,6 +51,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
   const [joinToken, setJoinToken] = useState('');
   const [joining, setJoining] = useState(false);
 
+  // Shift Creation Modal
+  const [showCreateShiftModal, setShowCreateShiftModal] = useState(false);
+  const [shiftRoleName, setShiftRoleName] = useState('Floor Staff');
+  const [shiftAssigneeId, setShiftAssigneeId] = useState<string>('');
+  const [shiftDate, setShiftDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [shiftStartHour, setShiftStartHour] = useState('09:00');
+  const [shiftEndHour, setShiftEndHour] = useState('17:00');
+  const [shiftNotes, setShiftNotes] = useState('');
+  const [shiftConflictError, setShiftConflictError] = useState<string | null>(null);
+  const [creatingShift, setCreatingShift] = useState(false);
+
   const loadData = useCallback(async () => {
     setErrorMsg(null);
     try {
@@ -59,11 +78,26 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
           : teamsRes[0];
         setSelectedTeam(active);
 
-        const membersRes = await ApiService.getTeamMembers(active.id);
+        const [membersRes, shiftsRes, actRes] = await Promise.all([
+          ApiService.getTeamMembers(active.id),
+          ApiService.getShifts(active.id),
+          ApiService.getActivityFeed(active.id, 1, 15),
+        ]);
+
         setTeamMembers(membersRes);
+        setShifts(shiftsRes);
+        setActivityItems(actRes.items);
+        setActivityHasMore(actRes.pagination.hasMore);
+        setActivityPage(1);
+
+        if (membersRes.length > 0 && !shiftAssigneeId) {
+          setShiftAssigneeId(membersRes[0].userId);
+        }
       } else {
         setSelectedTeam(null);
         setTeamMembers([]);
+        setShifts([]);
+        setActivityItems([]);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch dashboard data');
@@ -71,7 +105,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedTeam]);
+  }, [selectedTeam, shiftAssigneeId]);
 
   useEffect(() => {
     loadData();
@@ -85,8 +119,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
   const handleSelectTeam = async (team: any) => {
     setSelectedTeam(team);
     try {
-      const membersRes = await ApiService.getTeamMembers(team.id);
+      const [membersRes, shiftsRes, actRes] = await Promise.all([
+        ApiService.getTeamMembers(team.id),
+        ApiService.getShifts(team.id),
+        ApiService.getActivityFeed(team.id, 1, 15),
+      ]);
       setTeamMembers(membersRes);
+      setShifts(shiftsRes);
+      setActivityItems(actRes.items);
+      setActivityHasMore(actRes.pagination.hasMore);
+      setActivityPage(1);
     } catch {
       // Ignored
     }
@@ -131,7 +173,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     if (!joinToken.trim()) return;
     setJoining(true);
     try {
-      // Clean token if full URL was pasted
       const cleanToken = joinToken.includes('/')
         ? joinToken.split('/').pop()!
         : joinToken.trim();
@@ -148,14 +189,81 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     }
   };
 
-  const handleRoleChange = async (member: any, nextRole: 'MANAGER' | 'STAFF') => {
+  const handleCreateShift = async () => {
     if (!selectedTeam) return;
+    setShiftConflictError(null);
+    setCreatingShift(true);
+
+    const startTimeISO = `${shiftDate}T${shiftStartHour}:00.000Z`;
+    const endTimeISO = `${shiftDate}T${shiftEndHour}:00.000Z`;
+
     try {
-      await ApiService.updateMemberRole(selectedTeam.id, member.membershipId, nextRole);
-      const membersRes = await ApiService.getTeamMembers(selectedTeam.id);
-      setTeamMembers(membersRes);
+      await ApiService.createShift(selectedTeam.id, {
+        assignedToId: shiftAssigneeId || undefined,
+        roleName: shiftRoleName.trim() || 'Floor Staff',
+        startTime: startTimeISO,
+        endTime: endTimeISO,
+        notes: shiftNotes.trim() || undefined,
+      });
+
+      setShowCreateShiftModal(false);
+      setShiftNotes('');
+      Alert.alert('Success', 'Shift created successfully!');
+      // Refresh shifts and activity
+      const [shiftsRes, actRes] = await Promise.all([
+        ApiService.getShifts(selectedTeam.id),
+        ApiService.getActivityFeed(selectedTeam.id, 1, 15),
+      ]);
+      setShifts(shiftsRes);
+      setActivityItems(actRes.items);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to update role');
+      if (err.code === 'SHIFT_CONFLICT') {
+        setShiftConflictError('Scheduling Conflict: Staff member already has an overlapping shift during these hours.');
+      } else {
+        setShiftConflictError(err.message || 'Failed to schedule shift');
+      }
+    } finally {
+      setCreatingShift(false);
+    }
+  };
+
+  const handleCancelShift = async (shiftId: string) => {
+    if (!selectedTeam) return;
+    Alert.alert('Cancel Shift', 'Are you sure you want to cancel this scheduled shift?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes, Cancel',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await ApiService.cancelShift(selectedTeam.id, shiftId);
+            const [shiftsRes, actRes] = await Promise.all([
+              ApiService.getShifts(selectedTeam.id),
+              ApiService.getActivityFeed(selectedTeam.id, 1, 15),
+            ]);
+            setShifts(shiftsRes);
+            setActivityItems(actRes.items);
+          } catch (err: any) {
+            Alert.alert('Error', err.message || 'Failed to cancel shift');
+          }
+        },
+      },
+    ]);
+  };
+
+  const loadMoreActivity = async () => {
+    if (!selectedTeam || !activityHasMore || loadingMoreActivity) return;
+    setLoadingMoreActivity(true);
+    try {
+      const nextPage = activityPage + 1;
+      const res = await ApiService.getActivityFeed(selectedTeam.id, nextPage, 15);
+      setActivityItems((prev) => [...prev, ...res.items]);
+      setActivityHasMore(res.pagination.hasMore);
+      setActivityPage(nextPage);
+    } catch {
+      // Ignored
+    } finally {
+      setLoadingMoreActivity(false);
     }
   };
 
@@ -201,7 +309,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
         </View>
       ) : (
         <>
-          {/* Teams Selector & Actions */}
+          {/* Teams Selector */}
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardTitle}>Teams & Locations</Text>
@@ -227,7 +335,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               <View style={styles.emptyBox}>
                 <Text style={styles.emptyText}>You do not belong to any team yet.</Text>
                 <Text style={styles.emptySubtext}>
-                  Create your business team or enter an invitation code to join.
+                  Create your business team or enter an invitation token to join.
                 </Text>
               </View>
             ) : (
@@ -267,32 +375,218 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
             )}
           </View>
 
-          {/* Active Team Detail & Member Management */}
+          {/* Navigation Sub-Tabs */}
           {selectedTeam && (
+            <View style={styles.tabNavRow}>
+              <TouchableOpacity
+                style={[styles.navTab, activeTab === 'schedule' && styles.navTabActive]}
+                onPress={() => setActiveTab('schedule')}
+              >
+                <Text style={[styles.navTabText, activeTab === 'schedule' && styles.navTabTextActive]}>
+                  📅 Shifts ({shifts.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.navTab, activeTab === 'activity' && styles.navTabActive]}
+                onPress={() => setActiveTab('activity')}
+              >
+                <Text style={[styles.navTabText, activeTab === 'activity' && styles.navTabTextActive]}>
+                  ⚡ Feed ({activityItems.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.navTab, activeTab === 'roster' && styles.navTabActive]}
+                onPress={() => setActiveTab('roster')}
+              >
+                <Text style={[styles.navTabText, activeTab === 'roster' && styles.navTabTextActive]}>
+                  👥 Roster ({teamMembers.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.navTab, activeTab === 'overview' && styles.navTabActive]}
+                onPress={() => setActiveTab('overview')}
+              >
+                <Text style={[styles.navTabText, activeTab === 'overview' && styles.navTabTextActive]}>
+                  ℹ️ Info
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* TAB 1: SCHEDULE / CALENDAR */}
+          {selectedTeam && activeTab === 'schedule' && (
             <View style={styles.card}>
               <View style={styles.cardHeaderRow}>
                 <View>
-                  <Text style={styles.cardTitle}>{selectedTeam.name}</Text>
+                  <Text style={styles.cardTitle}>Shift Schedule</Text>
                   <Text style={styles.cardSubtitle}>
-                    Timezone: {selectedTeam.timezone} • {teamMembers.length} Members
+                    Active timezone: {selectedTeam.timezone}
                   </Text>
                 </View>
                 {canManage && (
                   <TouchableOpacity
-                    style={styles.inviteButton}
+                    style={styles.actionPillPrimary}
+                    onPress={() => {
+                      setShiftConflictError(null);
+                      setShowCreateShiftModal(true);
+                    }}
+                  >
+                    <Text style={[styles.actionPillText, styles.actionPillPrimaryText]}>
+                      + Add Shift
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {shifts.length === 0 ? (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyText}>No shifts scheduled yet.</Text>
+                  <Text style={styles.emptySubtext}>
+                    {canManage
+                      ? 'Tap "+ Add Shift" above to schedule your staff members.'
+                      : 'Your manager has not posted upcoming shifts yet.'}
+                  </Text>
+                </View>
+              ) : (
+                shifts.map((s) => {
+                  const startDate = new Date(s.startTime);
+                  const endDate = new Date(s.endTime);
+                  const dateStr = startDate.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  });
+                  const timeRangeStr = `${startDate.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })} – ${endDate.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`;
+
+                  return (
+                    <View key={s.id} style={styles.shiftCard}>
+                      <View style={styles.shiftHeaderRow}>
+                        <View>
+                          <Text style={styles.shiftDateText}>{dateStr}</Text>
+                          <Text style={styles.shiftTimeText}>{timeRangeStr}</Text>
+                        </View>
+                        <View style={styles.shiftBadge}>
+                          <Text style={styles.shiftBadgeText}>{s.roleName || 'General'}</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.shiftAssigneeRow}>
+                        <Text style={styles.shiftAssigneeLabel}>Assignee:</Text>
+                        <Text style={styles.shiftAssigneeName}>
+                          {s.assigneeName || 'Open Shift'}
+                        </Text>
+                      </View>
+
+                      {s.notes ? (
+                        <Text style={styles.shiftNotesText}>Note: {s.notes}</Text>
+                      ) : null}
+
+                      {canManage && (
+                        <View style={styles.shiftActionFooter}>
+                          <TouchableOpacity
+                            style={styles.cancelShiftBtn}
+                            onPress={() => handleCancelShift(s.id)}
+                          >
+                            <Text style={styles.cancelShiftText}>Cancel Shift</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          )}
+
+          {/* TAB 2: PAGINATED ACTIVITY FEED */}
+          {selectedTeam && activeTab === 'activity' && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Activity Feed</Text>
+              <Text style={styles.cardSubtitle}>
+                Real-time audit log of shifts, updates, and workforce events.
+              </Text>
+
+              {activityItems.length === 0 ? (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyText}>No activity recorded yet.</Text>
+                </View>
+              ) : (
+                <View style={styles.activityFeedList}>
+                  {activityItems.map((item) => (
+                    <View key={item.id} style={styles.activityRow}>
+                      <View style={styles.activityDot} />
+                      <View style={styles.activityBody}>
+                        <View style={styles.activityHeader}>
+                          <Text style={styles.activityActor}>{item.actorName}</Text>
+                          <View
+                            style={[
+                              styles.actionTag,
+                              item.action === 'CREATED'
+                                ? styles.actionTagCreated
+                                : item.action === 'CANCELLED'
+                                ? styles.actionTagCancelled
+                                : styles.actionTagUpdated,
+                            ]}
+                          >
+                            <Text style={styles.actionTagText}>{item.action}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.activityDesc}>{item.description}</Text>
+                        <Text style={styles.activityTime}>
+                          {new Date(item.createdAt).toLocaleString()}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  {activityHasMore && (
+                    <TouchableOpacity
+                      style={styles.loadMoreBtn}
+                      onPress={loadMoreActivity}
+                      disabled={loadingMoreActivity}
+                    >
+                      {loadingMoreActivity ? (
+                        <ActivityIndicator color={colors.primary} />
+                      ) : (
+                        <Text style={styles.loadMoreText}>Load Older Events</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* TAB 3: TEAM ROSTER & MEMBERS */}
+          {selectedTeam && activeTab === 'roster' && (
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <View>
+                  <Text style={styles.cardTitle}>{selectedTeam.name} Roster</Text>
+                  <Text style={styles.cardSubtitle}>{teamMembers.length} active members</Text>
+                </View>
+                {canManage && (
+                  <TouchableOpacity
+                    style={styles.actionPillPrimary}
                     onPress={() => {
                       setGeneratedInviteLink(null);
                       setShowInviteModal(true);
                     }}
                   >
-                    <Text style={styles.inviteButtonText}>+ Invite Staff</Text>
+                    <Text style={[styles.actionPillText, styles.actionPillPrimaryText]}>
+                      + Invite
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
 
-              {/* Members List */}
               <View style={styles.membersList}>
-                <Text style={styles.sectionHeading}>Team Roster & Roles</Text>
                 {teamMembers.map((member) => (
                   <View key={member.membershipId} style={styles.memberRow}>
                     <View style={styles.memberInfo}>
@@ -315,23 +609,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                       >
                         <Text style={styles.roleBadgeText}>{member.role}</Text>
                       </View>
-
-                      {/* Role Promotion for Owners */}
-                      {userRole === 'OWNER' && member.role !== 'OWNER' && (
-                        <TouchableOpacity
-                          style={styles.roleToggleBtn}
-                          onPress={() =>
-                            handleRoleChange(
-                              member,
-                              member.role === 'STAFF' ? 'MANAGER' : 'STAFF'
-                            )
-                          }
-                        >
-                          <Text style={styles.roleToggleText}>
-                            {member.role === 'STAFF' ? 'Make Mgr' : 'Make Staff'}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
                     </View>
                   </View>
                 ))}
@@ -339,26 +616,142 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
             </View>
           )}
 
-          {/* User Account & Verification Overview */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your Account</Text>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Email:</Text>
-              <Text style={styles.infoValue}>{profile.email || '—'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Account Status:</Text>
-              <View style={styles.badgeSuccess}>
-                <Text style={styles.badgeSuccessText}>{profile.status || 'ACTIVE'}</Text>
+          {/* TAB 4: OVERVIEW & SYSTEM INFO */}
+          {activeTab === 'overview' && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Account & Database Status</Text>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>User:</Text>
+                <Text style={styles.infoValue}>{profile.email || '—'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Status:</Text>
+                <View style={styles.badgeSuccess}>
+                  <Text style={styles.badgeSuccessText}>{profile.status || 'ACTIVE'}</Text>
+                </View>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Team Role:</Text>
+                <Text style={styles.infoValue}>{userRole}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Backend Database:</Text>
+                <Text style={styles.infoValue}>PostgreSQL (Live)</Text>
               </View>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Role in Current Team:</Text>
-              <Text style={styles.infoValue}>{userRole}</Text>
-            </View>
-          </View>
+          )}
         </>
       )}
+
+      {/* CREATE SHIFT MODAL */}
+      <Modal visible={showCreateShiftModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Schedule Shift</Text>
+            <Text style={styles.modalSubtitle}>
+              Assign a staff member and specify shift hours. Overlaps are automatically prevented.
+            </Text>
+
+            {shiftConflictError ? (
+              <View style={styles.conflictBanner}>
+                <Text style={styles.conflictText}>{shiftConflictError}</Text>
+              </View>
+            ) : null}
+
+            <Text style={styles.inputLabel}>Role / Position</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. Lead Barista, Cashier"
+              placeholderTextColor={colors.onSurfaceVariant}
+              value={shiftRoleName}
+              onChangeText={setShiftRoleName}
+            />
+
+            <Text style={styles.inputLabel}>Assign Staff Member</Text>
+            <ScrollView horizontal style={styles.assigneePicker}>
+              {teamMembers.map((m) => (
+                <TouchableOpacity
+                  key={m.userId}
+                  style={[
+                    styles.assigneeChoice,
+                    shiftAssigneeId === m.userId && styles.assigneeChoiceActive,
+                  ]}
+                  onPress={() => setShiftAssigneeId(m.userId)}
+                >
+                  <Text
+                    style={[
+                      styles.assigneeChoiceText,
+                      shiftAssigneeId === m.userId && styles.assigneeChoiceTextActive,
+                    ]}
+                  >
+                    {m.firstName} ({m.role})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.rowInputs}>
+              <View style={{ flex: 1, marginRight: spacing.xs }}>
+                <Text style={styles.inputLabel}>Date (YYYY-MM-DD)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="2026-10-10"
+                  placeholderTextColor={colors.onSurfaceVariant}
+                  value={shiftDate}
+                  onChangeText={setShiftDate}
+                />
+              </View>
+              <View style={{ width: 85, marginRight: spacing.xs }}>
+                <Text style={styles.inputLabel}>Start (HH:MM)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="09:00"
+                  placeholderTextColor={colors.onSurfaceVariant}
+                  value={shiftStartHour}
+                  onChangeText={setShiftStartHour}
+                />
+              </View>
+              <View style={{ width: 85 }}>
+                <Text style={styles.inputLabel}>End (HH:MM)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="17:00"
+                  placeholderTextColor={colors.onSurfaceVariant}
+                  value={shiftEndHour}
+                  onChangeText={setShiftEndHour}
+                />
+              </View>
+            </View>
+
+            <Text style={styles.inputLabel}>Notes / Instructions</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Optional notes"
+              placeholderTextColor={colors.onSurfaceVariant}
+              value={shiftNotes}
+              onChangeText={setShiftNotes}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setShowCreateShiftModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmit, creatingShift && { opacity: 0.6 }]}
+                onPress={handleCreateShift}
+                disabled={creatingShift}
+              >
+                <Text style={styles.modalSubmitText}>
+                  {creatingShift ? 'Saving...' : 'Confirm Shift'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* CREATE TEAM MODAL */}
       <Modal visible={showCreateTeamModal} transparent animationType="slide">
@@ -403,7 +796,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Invite Team Member</Text>
             <Text style={styles.modalSubtitle}>
-              Invite by entering their email address or generate a shareable link.
+              Invite by entering their email address or generate a shareable token.
             </Text>
 
             <TextInput
@@ -419,34 +812,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
             <View style={styles.rolePickerRow}>
               <Text style={styles.rolePickerLabel}>Role:</Text>
               <TouchableOpacity
-                style={[
-                  styles.roleChoice,
-                  inviteRole === 'STAFF' && styles.roleChoiceActive,
-                ]}
+                style={[styles.roleChoice, inviteRole === 'STAFF' && styles.roleChoiceActive]}
                 onPress={() => setInviteRole('STAFF')}
               >
-                <Text
-                  style={[
-                    styles.roleChoiceText,
-                    inviteRole === 'STAFF' && styles.roleChoiceTextActive,
-                  ]}
-                >
+                <Text style={[styles.roleChoiceText, inviteRole === 'STAFF' && styles.roleChoiceTextActive]}>
                   STAFF
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[
-                  styles.roleChoice,
-                  inviteRole === 'MANAGER' && styles.roleChoiceActive,
-                ]}
+                style={[styles.roleChoice, inviteRole === 'MANAGER' && styles.roleChoiceActive]}
                 onPress={() => setInviteRole('MANAGER')}
               >
-                <Text
-                  style={[
-                    styles.roleChoiceText,
-                    inviteRole === 'MANAGER' && styles.roleChoiceTextActive,
-                  ]}
-                >
+                <Text style={[styles.roleChoiceText, inviteRole === 'MANAGER' && styles.roleChoiceTextActive]}>
                   MANAGER
                 </Text>
               </TouchableOpacity>
@@ -628,6 +1005,9 @@ const styles = StyleSheet.create({
   },
   actionPillPrimary: {
     backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
   },
   actionPillText: {
     ...typography.labelSmall,
@@ -700,27 +1080,182 @@ const styles = StyleSheet.create({
     color: '#1C1A1F',
     letterSpacing: 0.5,
   },
-  inviteButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.md,
+  tabNavRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceContainer,
+    borderRadius: radius.md,
+    padding: 3,
+    marginBottom: spacing.md,
+  },
+  navTab: {
+    flex: 1,
     paddingVertical: spacing.sm,
+    alignItems: 'center',
     borderRadius: radius.sm,
   },
-  inviteButtonText: {
+  navTabActive: {
+    backgroundColor: colors.surface,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  navTabText: {
+    ...typography.labelSmall,
+    color: colors.onSurfaceVariant,
+    fontWeight: '600',
+  },
+  navTabTextActive: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  shiftCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  shiftHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs,
+  },
+  shiftDateText: {
+    ...typography.titleMedium,
+    color: colors.onSurface,
+    fontWeight: '700',
+  },
+  shiftTimeText: {
+    ...typography.bodyMedium,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  shiftBadge: {
+    backgroundColor: colors.primaryContainer,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  shiftBadgeText: {
+    ...typography.labelSmall,
+    color: colors.onPrimaryContainer,
+    fontWeight: '700',
+  },
+  shiftAssigneeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  shiftAssigneeLabel: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginRight: spacing.xs,
+  },
+  shiftAssigneeName: {
+    ...typography.bodyMedium,
+    color: colors.onSurface,
+    fontWeight: '600',
+  },
+  shiftNotesText: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.xs,
+    fontStyle: 'italic',
+  },
+  shiftActionFooter: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceContainer,
+    paddingTop: spacing.xs,
+  },
+  cancelShiftBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  cancelShiftText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.error,
+  },
+  activityFeedList: {
+    marginTop: spacing.sm,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceContainer,
+  },
+  activityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+    marginTop: 6,
+    marginRight: spacing.sm,
+  },
+  activityBody: {
+    flex: 1,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  activityActor: {
     ...typography.labelMedium,
-    color: colors.onPrimary,
+    color: colors.onSurface,
+    fontWeight: '700',
+  },
+  actionTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  actionTagCreated: {
+    backgroundColor: colors.successContainer,
+  },
+  actionTagUpdated: {
+    backgroundColor: colors.infoContainer,
+  },
+  actionTagCancelled: {
+    backgroundColor: colors.errorContainer,
+  },
+  actionTagText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#1C1A1F',
+  },
+  activityDesc: {
+    ...typography.bodyMedium,
+    color: colors.onSurface,
+  },
+  activityTime: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  loadMoreBtn: {
+    backgroundColor: colors.surfaceContainerHigh,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  loadMoreText: {
+    ...typography.labelMedium,
+    color: colors.primary,
     fontWeight: '700',
   },
   membersList: {
-    marginTop: spacing.sm,
-  },
-  sectionHeading: {
-    ...typography.labelMedium,
-    color: colors.onSurfaceVariant,
-    marginBottom: spacing.sm,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    marginTop: spacing.xs,
   },
   memberRow: {
     flexDirection: 'row',
@@ -745,18 +1280,6 @@ const styles = StyleSheet.create({
   memberRoleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-  },
-  roleToggleBtn: {
-    backgroundColor: colors.surfaceContainerHigh,
-    paddingHorizontal: spacing.xs + 2,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-  },
-  roleToggleText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.primary,
   },
   infoRow: {
     flexDirection: 'row',
@@ -796,11 +1319,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: radius.lg,
     padding: spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 8,
+    maxHeight: '90%',
   },
   modalTitle: {
     ...typography.headlineSmall,
@@ -812,16 +1331,64 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     marginBottom: spacing.md,
   },
+  inputLabel: {
+    ...typography.labelSmall,
+    color: colors.onSurface,
+    fontWeight: '700',
+    marginBottom: 4,
+    marginTop: 4,
+  },
   modalInput: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    height: 50,
-    fontSize: 16,
+    height: 48,
+    fontSize: 15,
     color: colors.onSurface,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  rowInputs: {
+    flexDirection: 'row',
+  },
+  assigneePicker: {
+    flexDirection: 'row',
+    marginBottom: spacing.sm,
+  },
+  assigneeChoice: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginRight: spacing.xs,
+    backgroundColor: colors.surface,
+  },
+  assigneeChoiceActive: {
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primary,
+  },
+  assigneeChoiceText: {
+    ...typography.labelSmall,
+    color: colors.onSurface,
+  },
+  assigneeChoiceTextActive: {
+    color: colors.onPrimaryContainer,
+    fontWeight: '700',
+  },
+  conflictBanner: {
+    backgroundColor: colors.errorContainer,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.error,
+  },
+  conflictText: {
+    ...typography.bodySmall,
+    color: colors.onErrorContainer,
+    fontWeight: '600',
   },
   rolePickerRow: {
     flexDirection: 'row',
@@ -873,6 +1440,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: spacing.sm,
+    marginTop: spacing.sm,
   },
   modalCancel: {
     paddingHorizontal: spacing.md,

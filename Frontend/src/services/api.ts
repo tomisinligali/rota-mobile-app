@@ -144,4 +144,62 @@ export const ApiService = {
       method: 'DELETE',
     });
   },
+
+  async getShifts(
+    teamId: string,
+    params?: { start?: string; end?: string; assignedToId?: string }
+  ): Promise<any[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.start) searchParams.append('start', params.start);
+    if (params?.end) searchParams.append('end', params.end);
+    if (params?.assignedToId) searchParams.append('assignedToId', params.assignedToId);
+    const qs = searchParams.toString();
+    return await request<any[]>(`/shifts/teams/${teamId}${qs ? `?${qs}` : ''}`);
+  },
+
+  async createShift(
+    teamId: string,
+    data: { assignedToId?: string; roleName?: string; startTime: string; endTime: string; notes?: string }
+  ): Promise<any> {
+    return await request<any>(`/shifts/teams/${teamId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateShift(
+    teamId: string,
+    shiftId: string,
+    data: any
+  ): Promise<any> {
+    return await request<any>(`/shifts/teams/${teamId}/${shiftId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async cancelShift(teamId: string, shiftId: string): Promise<any> {
+    return await request<any>(`/shifts/teams/${teamId}/${shiftId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getActivityFeed(teamId: string, page: number = 1, limit: number = 20): Promise<{ items: any[]; pagination: any }> {
+    const res = await fetch(`${BASE_URL}/shifts/teams/${teamId}/activity?page=${page}&limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${await StorageService.getToken()}`,
+      },
+    });
+    const json = await responseOrError(res);
+    return {
+      items: json.data,
+      pagination: json.meta,
+    };
+  },
 };
+
+async function responseOrError(res: Response) {
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw json.error || new Error('Request failed');
+  return json;
+}

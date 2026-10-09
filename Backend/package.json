@@ -14,17 +14,25 @@
   "license": "ISC",
   "dependencies": {
     "argon2": "^0.45.1",
+    "bcrypt": "^6.0.0",
+    "bullmq": "^6.3.12",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "google-auth-library": "^11.2.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.10.1",
     "pg": "^8.13.3"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^22.13.9",
+    "@types/nodemailer": "^6.4.24",
     "@types/pg": "^8.11.11",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"

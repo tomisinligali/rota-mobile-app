@@ -78,6 +78,17 @@ export const ApiService = {
     return res;
   },
 
+  async googleLogin(idToken: string) {
+    const res = await request<{ user: any; token: string }>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ idToken }),
+    });
+    if (res?.token) {
+      await StorageService.setToken(res.token);
+    }
+    return res;
+  },
+
   async logout(): Promise<void> {
     try {
       await request('/auth/logout', { method: 'POST' });
@@ -184,8 +195,13 @@ export const ApiService = {
     });
   },
 
-  async getActivityFeed(teamId: string, page: number = 1, limit: number = 20): Promise<{ items: any[]; pagination: any }> {
-    const res = await fetch(`${BASE_URL}/shifts/teams/${teamId}/activity?page=${page}&limit=${limit}`, {
+  async getActivityFeed(
+    teamId: string,
+    limit: number = 20,
+    cursor?: string | null
+  ): Promise<{ items: any[]; pagination: any }> {
+    const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+    const res = await fetch(`${BASE_URL}/shifts/teams/${teamId}/activity?limit=${limit}${cursorParam}`, {
       headers: {
         Authorization: `Bearer ${await StorageService.getToken()}`,
       },
@@ -196,6 +212,164 @@ export const ApiService = {
       pagination: json.meta,
     };
   },
+
+  async getTeamSwaps(teamId: string, status?: string): Promise<any[]> {
+    const qs = status ? `?status=${status}` : '';
+    return await request<any[]>(`/swaps/teams/${teamId}${qs}`);
+  },
+
+  async requestSwap(
+    teamId: string,
+    data: { shiftId: string; type: 'DIRECT_SWAP' | 'OPEN_SHIFT'; targetUserId?: string; reason?: string }
+  ): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/request`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async claimOpenShift(teamId: string, swapId: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/claim/${swapId}`, {
+      method: 'POST',
+    });
+  },
+
+  async approveSwap(teamId: string, swapId: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/approve/${swapId}`, {
+      method: 'POST',
+    });
+  },
+
+  async rejectSwap(teamId: string, swapId: string, reason?: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/reject/${swapId}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  async getSubscription(businessId: string): Promise<any> {
+    return await request<any>(`/billing/subscription/${businessId}`);
+  },
+
+  async previewProration(
+    businessId: string,
+    data: { newPlanTier: string; newSeatCount: number }
+  ): Promise<any> {
+    return await request<any>(`/billing/preview-proration/${businessId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateSubscription(
+    businessId: string,
+    data: { newPlanTier: string; newSeatCount: number }
+  ): Promise<any> {
+    return await request<any>(`/billing/update-subscription/${businessId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Notifications
+  async getNotifications(limit = 30): Promise<any> {
+    const token = await StorageService.getToken();
+    const res = await fetch(`${BASE_URL}/notifications?limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const json = await responseOrError(res);
+    return {
+      items: json.data || [],
+      unreadCount: json.meta?.unreadCount || 0,
+    };
+  },
+
+  async registerPushToken(pushToken: string, deviceType = 'expo'): Promise<any> {
+    return await request<any>('/notifications/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ pushToken, deviceType }),
+    });
+  },
+
+  async markNotificationAsRead(id: string): Promise<any> {
+    return await request<any>(`/notifications/${id}/read`, {
+      method: 'PATCH',
+    });
+  },
+
+  async markAllNotificationsAsRead(): Promise<any> {
+    return await request<any>('/notifications/read-all', {
+      method: 'POST',
+    });
+  },
+
+  // User Settings
+  async getUserSettings(): Promise<any> {
+    return await request<any>('/users/settings');
+  },
+
+  async updateUserSettings(data: any): Promise<any> {
+    return await request<any>('/users/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+export const NotificationsApi = {
+  getNotifications: ApiService.getNotifications,
+  registerPushToken: ApiService.registerPushToken,
+  markNotificationAsRead: ApiService.markNotificationAsRead,
+  markAllNotificationsAsRead: ApiService.markAllNotificationsAsRead,
+};
+
+export const UsersApi = {
+  getUserSettings: ApiService.getUserSettings,
+  updateUserSettings: ApiService.updateUserSettings,
+};
+
+export const BillingApi = {
+  getSubscription: ApiService.getSubscription,
+  previewProration: ApiService.previewProration,
+  updateSubscription: ApiService.updateSubscription,
+};
+
+export const SwapsApi = {
+  async getTeamSwaps(teamId: string, status?: string): Promise<any[]> {
+    const qs = status ? `?status=${status}` : '';
+    return await request<any[]>(`/swaps/teams/${teamId}${qs}`);
+  },
+
+  async requestSwap(
+    teamId: string,
+    data: { shiftId: string; type: 'DIRECT_SWAP' | 'OPEN_SHIFT'; targetUserId?: string; reason?: string }
+  ): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/request`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async claimOpenShift(teamId: string, swapId: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/claim/${swapId}`, {
+      method: 'POST',
+    });
+  },
+
+  async approveSwap(teamId: string, swapId: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/approve/${swapId}`, {
+      method: 'POST',
+    });
+  },
+
+  async rejectSwap(teamId: string, swapId: string, reason?: string): Promise<any> {
+    return await request<any>(`/swaps/teams/${teamId}/reject/${swapId}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
 };
 
 async function responseOrError(res: Response) {
@@ -203,3 +377,4 @@ async function responseOrError(res: Response) {
   if (!res.ok) throw json.error || new Error('Request failed');
   return json;
 }
+

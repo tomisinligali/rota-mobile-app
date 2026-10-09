@@ -1,4 +1,5 @@
 import { pool, query } from '../../db/pool';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface CreateShiftInput {
   assignedToId?: string;
@@ -104,6 +105,20 @@ export class ShiftsService {
          VALUES ($1, $2, 'SHIFT', $3, 'CREATED', $4, $5)`,
         [teamId, creatorId, shift.id, desc, JSON.stringify({ startTime, endTime, roleName, assignedToId })]
       );
+
+      if (assignedToId) {
+        await NotificationsService.createNotification(
+          {
+            userId: assignedToId,
+            teamId,
+            type: 'SHIFT_CREATED',
+            title: 'New Shift Scheduled',
+            body: `You have been scheduled for a ${roleName || 'General'} shift on ${start.toISOString().split('T')[0]}.`,
+            data: { shiftId: shift.id, teamId },
+          },
+          client
+        );
+      }
 
       await client.query('COMMIT');
       return {
@@ -267,13 +282,18 @@ export class ShiftsService {
   }
 
   static async cancelShift(editorId: string, teamId: string, shiftId: string) {
-    const shiftRes = await query(`SELECT role_name FROM shifts WHERE id = $1 AND team_id = $2`, [shiftId, teamId]);
+    const shiftRes = await query(
+      `SELECT role_name, assigned_to_id, start_time FROM shifts WHERE id = $1 AND team_id = $2`,
+      [shiftId, teamId]
+    );
     if (shiftRes.rowCount === 0) {
       const err: any = new Error('Shift not found');
       err.code = 'NOT_FOUND';
       err.status = 404;
       throw err;
     }
+
+    const shift = shiftRes.rows[0];
 
     await query(
       `UPDATE shifts SET status = 'CANCELLED', modified_by_id = $1, updated_at = NOW()
@@ -284,34 +304,88 @@ export class ShiftsService {
     await query(
       `INSERT INTO activity_logs (team_id, actor_id, entity_type, entity_id, action, description, details)
        VALUES ($1, $2, 'SHIFT', $3, 'CANCELLED', $4, '{}')`,
-      [teamId, editorId, shiftId, `Cancelled shift (${shiftRes.rows[0].role_name || 'General'})`]
+      [teamId, editorId, shiftId, `Cancelled shift (${shift.role_name || 'General'})`]
     );
+
+    if (shift.assigned_to_id) {
+      await NotificationsService.createNotification({
+        userId: shift.assigned_to_id,
+        teamId,
+        type: 'SHIFT_CANCELLED',
+        title: 'Shift Cancelled',
+        body: `Your ${shift.role_name || 'General'} shift on ${new Date(shift.start_time).toISOString().split('T')[0]} has been cancelled.`,
+        data: { shiftId, teamId },
+      });
+    }
 
     return { success: true };
   }
 
-  static async getActivityFeed(teamId: string, page: number = 1, limit: number = 20) {
-    const offset = (page - 1) * limit;
+  static async getActivityFeed(
+    teamId: string,
+    limit: number = 20,
+    cursor?: string
+  ) {
+    const safeLimit = Math.max(1, Math.min(100, limit));
 
-    const countRes = await query(
-      `SELECT COUNT(*) as total FROM activity_logs WHERE team_id = $1`,
-      [teamId]
-    );
-    const total = parseInt(countRes.rows[0].total, 10);
+    // Decode cursor if provided
+    let decodedCursor: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        let raw = Buffer.from(cursor, 'base64url').toString('utf8');
+        let parsed: any;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          raw = Buffer.from(cursor, 'base64').toString('utf8');
+          parsed = JSON.parse(raw);
+        }
+        if (parsed && typeof parsed.createdAt === 'string' && typeof parsed.id === 'string') {
+          decodedCursor = { createdAt: parsed.createdAt, id: parsed.id };
+        }
+      } catch {
+        decodedCursor = null;
+      }
+    }
 
-    const logsRes = await query(
-      `SELECT al.id, al.team_id, al.actor_id, al.entity_type, al.entity_id,
-              al.action, al.description, al.details, al.created_at,
-              u.first_name as actor_first_name, u.last_name as actor_last_name
-       FROM activity_logs al
-       JOIN users u ON u.id = al.actor_id
-       WHERE al.team_id = $1
-       ORDER BY al.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [teamId, limit, offset]
-    );
+    let queryText: string;
+    let params: any[];
 
-    const items = logsRes.rows.map((r) => ({
+    if (decodedCursor) {
+      // Seek records older than (cursor.createdAt, cursor.id) using tuple comparison
+      // to guarantee records with identical timestamps are not skipped or duplicated.
+      queryText = `
+        SELECT al.id, al.team_id, al.actor_id, al.entity_type, al.entity_id,
+               al.action, al.description, al.details, al.created_at,
+               u.first_name as actor_first_name, u.last_name as actor_last_name
+        FROM activity_logs al
+        JOIN users u ON u.id = al.actor_id
+        WHERE al.team_id = $1
+          AND (al.created_at, al.id) < ($2, $3)
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT $4
+      `;
+      params = [teamId, decodedCursor.createdAt, decodedCursor.id, safeLimit + 1];
+    } else {
+      // First page
+      queryText = `
+        SELECT al.id, al.team_id, al.actor_id, al.entity_type, al.entity_id,
+               al.action, al.description, al.details, al.created_at,
+               u.first_name as actor_first_name, u.last_name as actor_last_name
+        FROM activity_logs al
+        JOIN users u ON u.id = al.actor_id
+        WHERE al.team_id = $1
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT $2
+      `;
+      params = [teamId, safeLimit + 1];
+    }
+
+    const logsRes = await query(queryText, params);
+    const hasMore = logsRes.rows.length > safeLimit;
+    const pageRows = hasMore ? logsRes.rows.slice(0, safeLimit) : logsRes.rows;
+
+    const items = pageRows.map((r) => ({
       id: r.id,
       entityType: r.entity_type,
       entityId: r.entity_id,
@@ -322,13 +396,26 @@ export class ShiftsService {
       actorName: `${r.actor_first_name} ${r.actor_last_name || ''}`.trim(),
     }));
 
+    const lastItem = items.length > 0 ? items[items.length - 1] : null;
+    const nextCursor =
+      hasMore && lastItem
+        ? Buffer.from(
+            JSON.stringify({
+              createdAt:
+                typeof lastItem.createdAt === 'string'
+                  ? lastItem.createdAt
+                  : new Date(lastItem.createdAt).toISOString(),
+              id: lastItem.id,
+            })
+          ).toString('base64url')
+        : null;
+
     return {
       items,
       pagination: {
-        page,
-        limit,
-        total,
-        hasMore: offset + items.length < total,
+        limit: safeLimit,
+        nextCursor,
+        hasMore,
       },
     };
   }

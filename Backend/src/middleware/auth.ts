@@ -9,6 +9,7 @@ export interface AuthenticatedUser {
   firstName: string;
   lastName: string | null;
   status: string;
+  emailVerified: boolean;
 }
 
 declare global {
@@ -44,7 +45,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // Authoritative server-controlled session check
     const sessionRes = await query(
       `SELECT s.id, s.user_id, s.expires_at, s.revoked_at,
-              u.id as u_id, u.email, u.first_name, u.last_name, u.status
+              u.id as u_id, u.email, u.first_name, u.last_name, u.status, u.email_verified_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,
@@ -80,6 +81,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       firstName: row.first_name,
       lastName: row.last_name,
       status: row.status,
+      emailVerified: row.email_verified_at !== null,
     };
     req.sessionToken = token;
 

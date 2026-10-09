@@ -193,7 +193,8 @@ Use secure adaptive password hashing such as Argon2id.
 Sessions must be server-controlled, revocable, and securely configured.
 
 Email verification and password reset secrets must be single-use and
-time-limited.
+time-limited. Never use `Math.random()` or Node's `crypto.randomInt()` to
+generate verification codes; use `crypto.randomBytes()` instead.
 
 Rate-limit registration, login, password reset, invitation, and other
 sensitive operations.
@@ -682,6 +683,14 @@ Every network-dependent screen needs:
 
 Use accessible labels, sufficient touch targets, dynamic text sizing,
 and status indicators that do not rely on color alone.
+
+### Icon conventions
+
+Use `Ionicons` from `@expo/vector-icons` consistently across the mobile application:
+
+-   Active / selected state: use the filled icon name (e.g. `calendar`, `newspaper`, `person`, `swap-horizontal`, `notifications`, `card`, `settings`).
+-   Inactive / unselected state: use the `-outline` variant (e.g. `calendar-outline`, `newspaper-outline`, `person-outline`, `swap-horizontal-outline`, `notifications-outline`, `card-outline`, `settings-outline`).
+-   Do not use raw Unicode emojis for standard navigation, buttons, and system controls.
 
 ### Code comments
 

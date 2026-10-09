@@ -11,15 +11,31 @@
       "backgroundColor": "#6600CC"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rota.mobile"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#6600CC"
-      }
+      },
+      "package": "com.rota.mobile"
     },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.175541611281-7c4m49e9evi6brs0fcup0s4hnbhpn4pi"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ]
     ]
   }
 }

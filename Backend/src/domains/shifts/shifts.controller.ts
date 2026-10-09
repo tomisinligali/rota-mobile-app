@@ -113,10 +113,10 @@ export class ShiftsController {
   static async getActivityFeed(req: Request, res: Response): Promise<void> {
     try {
       const teamId = String(req.params.teamId);
-      const page = parseInt((req.query.page as string) || '1', 10);
+      const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
       const limit = parseInt((req.query.limit as string) || '20', 10);
 
-      const feed = await ShiftsService.getActivityFeed(teamId, page, limit);
+      const feed = await ShiftsService.getActivityFeed(teamId, limit, cursor);
       res.status(200).json({
         data: feed.items,
         meta: {

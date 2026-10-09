@@ -5,7 +5,7 @@ import { ApiService } from '../services/api';
 import { StorageService } from '../services/storage';
 
 interface SplashScreenProps {
-  onNavigate: (screen: 'auth' | 'dashboard', user?: any) => void;
+  onNavigate: (screen: 'auth' | 'onboarding' | 'dashboard', user?: any) => void;
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onNavigate }) => {
@@ -23,7 +23,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onNavigate }) => {
       // Validate session against authoritative backend
       const res = await ApiService.getMe();
       if (res?.user) {
-        onNavigate('dashboard', res.user);
+        const teams = await ApiService.getTeams().catch(() => []);
+        if (teams.length === 0) {
+          onNavigate('onboarding', res.user);
+        } else {
+          onNavigate('dashboard', res.user);
+        }
       } else {
         await StorageService.clearToken();
         onNavigate('auth');

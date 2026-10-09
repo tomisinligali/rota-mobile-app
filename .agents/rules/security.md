@@ -12,6 +12,7 @@ trigger: always_on
 - Session cookies/tokens must use secure configuration appropriate to the environment.
 - Email verification secrets must expire and be single-use.
 - Password reset secrets must expire and be single-use.
+- Never use Math.random() or Node's crypto.randomInt() to generate verification codes. Use crypto.randomBytes() with secure byte mapping.
 
 ## Authorization
 

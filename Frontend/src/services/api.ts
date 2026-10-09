@@ -93,4 +93,55 @@ export const ApiService = {
   async getDashboardSummary(): Promise<any> {
     return await request<any>('/dashboard/summary');
   },
+
+  async getTeams(): Promise<any[]> {
+    return await request<any[]>('/teams');
+  },
+
+  async createTeam(data: { name: string; businessName?: string; timezone?: string }): Promise<any> {
+    return await request<any>('/teams', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getTeamMembers(teamId: string): Promise<any[]> {
+    return await request<any[]>(`/teams/${teamId}/members`);
+  },
+
+  async createInvitation(
+    teamId: string,
+    data: { email?: string; role?: 'MANAGER' | 'STAFF'; expiresInDays?: number }
+  ): Promise<any> {
+    return await request<any>(`/invitations/teams/${teamId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async verifyInvitation(token: string): Promise<any> {
+    const response = await fetch(`${BASE_URL}/invitations/verify/${token}`);
+    const json = await response.json();
+    if (!response.ok) throw json.error;
+    return json.data;
+  },
+
+  async acceptInvitation(token: string): Promise<any> {
+    return await request<any>(`/invitations/accept/${token}`, {
+      method: 'POST',
+    });
+  },
+
+  async updateMemberRole(teamId: string, memberId: string, role: string): Promise<any> {
+    return await request<any>(`/teams/${teamId}/members/${memberId}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  async deactivateMember(teamId: string, memberId: string): Promise<any> {
+    return await request<any>(`/teams/${teamId}/members/${memberId}`, {
+      method: 'DELETE',
+    });
+  },
 };

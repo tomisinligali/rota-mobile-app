@@ -1,28 +1,54 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { colors, typography, spacing, radius } from '../theme/tokens';
+import { BrandLogo } from '../components/BrandLogo';
 import { ApiService } from '../services/api';
 import { StorageService } from '../services/storage';
 
 interface SplashScreenProps {
-  onNavigate: (screen: 'auth' | 'onboarding' | 'dashboard', user?: any) => void;
+  onNavigate: (
+    screen: 'intro' | 'auth' | 'verify' | 'onboarding' | 'dashboard',
+    user?: any
+  ) => void;
 }
+
+// Dev-only preview switch. When true, every launch replays the splash -> intro
+// walkthrough so all three onboarding slides can be reviewed on reload, even if
+// the walkthrough was already seen or a saved session exists. It is guarded by
+// __DEV__, so it can never affect a production build. Flip to `false` to restore
+// the normal "show the intro once per device" behavior.
+const PREVIEW_INTRO_ON_LAUNCH = __DEV__;
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onNavigate }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const checkSession = async () => {
     setErrorMsg(null);
+
+    // Dev preview: always replay the first-run walkthrough from the splash.
+    if (PREVIEW_INTRO_ON_LAUNCH) {
+      onNavigate('intro');
+      return;
+    }
+
     try {
       const token = await StorageService.getToken();
       if (!token) {
-        onNavigate('auth');
+        // First-run users see the intro walkthrough before sign-up; returning
+        // users go straight to auth.
+        const seenIntro = await StorageService.hasSeenIntro();
+        onNavigate(seenIntro ? 'auth' : 'intro');
         return;
       }
 
       // Validate session against authoritative backend
       const res = await ApiService.getMe();
       if (res?.user) {
+        // Unverified accounts must confirm their email before Getting Started.
+        if (res.user.emailVerified === false) {
+          onNavigate('verify', res.user);
+          return;
+        }
         const teams = await ApiService.getTeams().catch(() => []);
         if (teams.length === 0) {
           onNavigate('onboarding', res.user);
@@ -49,10 +75,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onNavigate }) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.logoBadge}>
-        <Text style={styles.logoText}>R</Text>
-      </View>
-      <Text style={styles.brandTitle}>Rota</Text>
+      <BrandLogo iconSize={44} textSize={40} onDark plate style={styles.brandLogo} />
       <Text style={styles.brandSubtitle}>Shift Scheduling for Small Businesses</Text>
 
       <View style={styles.statusContainer}>
@@ -79,29 +102,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.lg,
   },
-  logoBadge: {
-    width: 80,
-    height: 80,
-    borderRadius: radius.lg,
-    backgroundColor: colors.onPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
+  brandLogo: {
     marginBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  logoText: {
-    ...typography.displayLarge,
-    color: colors.primary,
-    fontWeight: '800',
-  },
-  brandTitle: {
-    ...typography.headlineLarge,
-    color: colors.onPrimary,
-    marginBottom: spacing.xs,
   },
   brandSubtitle: {
     ...typography.bodyMedium,
@@ -128,7 +130,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   retryText: {
     ...typography.labelMedium,

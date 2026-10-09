@@ -11,14 +11,21 @@ import {
   Keyboard,
   Platform,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../theme/tokens';
+import { BrandLogo } from '../components/BrandLogo';
 import { ApiService, ApiError } from '../services/api';
 import { getGoogleIdToken, isGoogleSignInCancelled } from '../services/googleAuth';
 
 interface AuthScreenProps {
   onSuccess: (user: any, needsOnboarding?: boolean) => void;
+  pendingInvite?: {
+    token: string;
+    teamName?: string;
+    email?: string;
+  } | null;
 }
 
 // Order matters: the length rule intentionally renders last.
@@ -31,7 +38,7 @@ const PASSWORD_RULES: { label: string; test: (value: string) => boolean }[] = [
   { label: 'Minimum Of 8 Characters', test: (v) => v.length >= 8 },
 ];
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,8 +50,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   const [showPassword, setShowPassword] = useState(false);
 
+  // Forgot / Reset Password state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
+
   const firstNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (pendingInvite?.email) {
+      setEmail(pendingInvite.email);
+    }
+  }, [pendingInvite]);
 
   // Focus the first field of the current mode (Email on Log In, First Name on Register).
   const focusFirstField = (login: boolean) => {
@@ -218,6 +243,62 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
     }
   };
 
+  const handleRequestReset = async () => {
+    if (!forgotEmail || !forgotEmail.trim()) {
+      setForgotError('Please enter your email address');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      const res = await ApiService.forgotPassword(forgotEmail.trim());
+      setForgotStep('reset');
+      setForgotSuccess(res.message || 'Check your email for the 6-digit reset code.');
+    } catch (err: any) {
+      setForgotError(err?.message || 'Failed to send reset code.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleConfirmReset = async () => {
+    if (!forgotCode || forgotCode.trim().length !== 6) {
+      setForgotError('Please enter the 6-digit reset code from your email.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setForgotError('New password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setForgotError('Passwords do not match.');
+      return;
+    }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      const res = await ApiService.resetPassword(
+        forgotEmail.trim(),
+        forgotCode.trim(),
+        newPassword
+      );
+      setShowForgotModal(false);
+      setIsLogin(true);
+      setEmail(forgotEmail.trim());
+      setPassword('');
+      setErrorMessage(null);
+      setForgotSuccess(res.message || 'Password reset successfully. Please log in.');
+      setForgotStep('request');
+      setForgotCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setForgotError(err?.message || 'Failed to reset password.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   // The submit button stays disabled until every visible field has data.
   const isFormFilled = getVisibleFields().every(
     (field) => getValue(field).trim().length > 0
@@ -241,8 +322,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
     }
   };
 
-  // Hidden by default; while typing, each rule is shown and checked off as it passes.
-  const passwordRuleItems = isLogin || password.length === 0 ? [] : PASSWORD_RULES;
+  // Hidden by default; while typing, only unmet rules stay visible and each one
+  // disappears as soon as the password satisfies it.
+  const passwordRuleItems =
+    isLogin || password.length === 0
+      ? []
+      : PASSWORD_RULES.filter((rule) => !rule.test(password));
 
   return (
     <KeyboardAvoidingView
@@ -252,9 +337,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>ROTA</Text>
-          </View>
+          <BrandLogo iconSize={48} showText={false} style={styles.headerLogo} />
           <Text style={styles.title}>{isLogin ? 'Welcome Back' : 'Create an Account'}</Text>
           <Text style={styles.subtitle}>
             {isLogin
@@ -262,6 +345,31 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
               : 'Sign up to start organizing shifts for your team'}
           </Text>
         </View>
+
+        {/* Pending Invitation Banner */}
+        {pendingInvite ? (
+          <View style={styles.inviteBanner}>
+            <Ionicons name="mail-unread-outline" size={22} color={colors.primary} />
+            <View style={styles.inviteBannerTextContainer}>
+              <Text style={styles.inviteBannerTitle}>Team invitation</Text>
+              <Text style={styles.inviteBannerSubtitle}>
+                You were invited to join{' '}
+                <Text style={styles.inviteTeamHighlight}>
+                  {pendingInvite.teamName || 'a team'}
+                </Text>
+                . Sign in or register to accept.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Success Banner */}
+        {forgotSuccess && !showForgotModal ? (
+          <View style={styles.successBanner}>
+            <Ionicons name="checkmark-circle-outline" size={18} color="#2E7D32" />
+            <Text style={styles.successText}>{forgotSuccess}</Text>
+          </View>
+        ) : null}
 
         {/* Tab Switcher */}
         <View style={styles.tabContainer}>
@@ -384,7 +492,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password * (8-64 characters)</Text>
+            <Text style={styles.label}>Password * (Min 8 Characters)</Text>
             <View style={styles.passwordField}>
               <TextInput
                 style={[
@@ -429,26 +537,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
 
             {passwordRuleItems.length > 0 ? (
               <View style={styles.passwordRequirements}>
-                {passwordRuleItems.map((rule) => {
-                  const met = rule.test(password);
-                  return (
-                    <View key={rule.label} style={styles.requirementRow}>
-                      <Ionicons
-                        name={met ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={met ? 16 : 14}
-                        color={met ? colors.onSuccessContainer : colors.onSurfaceVariant}
-                      />
-                      <Text
-                        style={[styles.requirementText, met && styles.requirementTextMet]}
-                      >
-                        {rule.label}
-                      </Text>
-                    </View>
-                  );
-                })}
+                {passwordRuleItems.map((rule) => (
+                  <View key={rule.label} style={styles.requirementRow}>
+                    <Ionicons name="ellipse-outline" size={14} color={colors.onSurfaceVariant} />
+                    <Text style={styles.requirementText}>{rule.label}</Text>
+                  </View>
+                ))}
               </View>
             ) : null}
           </View>
+
+          {isLogin && (
+            <TouchableOpacity
+              style={styles.forgotPasswordButton}
+              onPress={() => {
+                setErrorMessage(null);
+                setForgotError(null);
+                setForgotSuccess(null);
+                setForgotEmail(email);
+                setForgotStep('request');
+                setShowForgotModal(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Forgot password"
+            >
+              <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.submitButton, isSubmitDisabled && styles.submitButtonDisabled]}
@@ -464,6 +579,159 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Forgot / Reset Password Modal */}
+      <Modal
+        visible={showForgotModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowForgotModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleContainer}>
+                <Text style={styles.modalTitle}>
+                  {forgotStep === 'request' ? 'Reset password' : 'Enter reset code'}
+                </Text>
+                <Text style={styles.modalSubtitle}>
+                  {forgotStep === 'request'
+                    ? 'Enter your account email to receive a single-use 6-digit verification code.'
+                    : `Enter the 6-digit code sent to ${forgotEmail} and your new password.`}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowForgotModal(false)}
+                style={styles.modalCloseBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close-outline" size={24} color={colors.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            {forgotError ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{forgotError}</Text>
+              </View>
+            ) : null}
+
+            {forgotStep === 'request' ? (
+              <View style={styles.modalForm}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Email address *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="you@company.com"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    value={forgotEmail}
+                    onChangeText={setForgotEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.submitButton, forgotLoading && styles.submitButtonDisabled]}
+                  onPress={handleRequestReset}
+                  disabled={forgotLoading}
+                >
+                  {forgotLoading ? (
+                    <ActivityIndicator color={colors.onPrimary} />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Send reset code</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.modalSecondaryBtn}
+                  onPress={() => setShowForgotModal(false)}
+                >
+                  <Text style={styles.modalSecondaryBtnText}>Back to log in</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.modalForm}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>6-digit verification code *</Text>
+                  <TextInput
+                    style={[styles.input, styles.codeInput]}
+                    placeholder="123456"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    value={forgotCode}
+                    onChangeText={setForgotCode}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>New password * (min 8 characters)</Text>
+                  <View style={styles.passwordField}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      placeholder="••••••••"
+                      placeholderTextColor={colors.onSurfaceVariant}
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry={!showNewPassword}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={styles.passwordToggle}
+                      onPress={() => setShowNewPassword((p) => !p)}
+                    >
+                      <Ionicons
+                        name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={20}
+                        color={colors.onSurfaceVariant}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Confirm new password *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="••••••••"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry={!showNewPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.submitButton, forgotLoading && styles.submitButtonDisabled]}
+                  onPress={handleConfirmReset}
+                  disabled={forgotLoading}
+                >
+                  {forgotLoading ? (
+                    <ActivityIndicator color={colors.onPrimary} />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Reset password</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.modalSecondaryBtn}
+                  onPress={() => setForgotStep('request')}
+                >
+                  <Text style={styles.modalSecondaryBtnText}>Request new code</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -482,18 +750,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.lg,
   },
-  badge: {
-    backgroundColor: colors.primaryContainer,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
+  headerLogo: {
     marginBottom: spacing.sm,
-  },
-  badgeText: {
-    ...typography.labelSmall,
-    color: colors.onPrimaryContainer,
-    fontWeight: '700',
-    letterSpacing: 1,
   },
   title: {
     ...typography.headlineMedium,
@@ -510,7 +768,7 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceContainer,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     padding: 4,
     marginBottom: spacing.md,
   },
@@ -518,15 +776,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.sm,
     alignItems: 'center',
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   activeTab: {
     backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   tabText: {
     ...typography.labelLarge,
@@ -611,12 +864,9 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     flexShrink: 1,
   },
-  requirementTextMet: {
-    color: colors.onSuccessContainer,
-  },
   submitButton: {
     backgroundColor: colors.primary,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     paddingVertical: spacing.md,
     alignItems: 'center',
     marginTop: spacing.sm,
@@ -653,7 +903,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     paddingVertical: spacing.md,
   },
   googleLogo: {
@@ -664,5 +914,116 @@ const styles = StyleSheet.create({
     ...typography.labelLarge,
     color: colors.onSurface,
     fontWeight: '700',
+  },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  forgotPasswordText: {
+    ...typography.labelSmall,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  inviteBanner: {
+    backgroundColor: '#F3E8FF',
+    borderWidth: 1,
+    borderColor: '#D8B4FE',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  inviteBannerTextContainer: {
+    flex: 1,
+  },
+  inviteBannerTitle: {
+    ...typography.labelLarge,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  inviteBannerSubtitle: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  inviteTeamHighlight: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  successBanner: {
+    backgroundColor: '#E8F5E9',
+    borderWidth: 1,
+    borderColor: '#A5D6A7',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  successText: {
+    ...typography.bodySmall,
+    color: '#1B5E20',
+    fontWeight: '500',
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.xl,
+    paddingBottom: Platform.OS === 'ios' ? spacing.xxl + spacing.md : spacing.xl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.lg,
+  },
+  modalTitleContainer: {
+    flex: 1,
+    paddingRight: spacing.md,
+  },
+  modalTitle: {
+    ...typography.titleLarge,
+    color: colors.onSurface,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.xs,
+  },
+  modalCloseBtn: {
+    padding: spacing.xs,
+  },
+  modalForm: {
+    gap: spacing.xs,
+  },
+  codeInput: {
+    letterSpacing: 4,
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  modalSecondaryBtn: {
+    borderRadius: radius.full,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  modalSecondaryBtnText: {
+    ...typography.labelMedium,
+    color: colors.onSurfaceVariant,
+    fontWeight: '600',
   },
 });

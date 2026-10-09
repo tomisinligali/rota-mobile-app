@@ -1,24 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 
-/**
- * Minimal HTML page shown in the browser after clicking the emailed link.
- * Content is static/escaped (no user input is interpolated), so it is safe.
- */
-function confirmPage(success: boolean, message?: string): string {
-  const title = success ? 'Email verified' : 'Verification failed';
-  const body = success
-    ? 'Your email address has been verified. You can return to the Rota app.'
-    : message || 'This verification link is invalid or has expired.';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head>
-  <body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f4f4f5;margin:0;padding:48px 24px;text-align:center;color:#1a1a1a;">
-    <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;">
-      <h1 style="margin:0 0 12px;font-size:20px;">${title}</h1>
-      <p style="margin:0;color:#555;">${body}</p>
-    </div>
-  </body></html>`;
-}
-
 export class AuthController {
   static async register(req: Request, res: Response): Promise<void> {
     try {
@@ -80,10 +62,31 @@ export class AuthController {
     }
   }
 
+  static async refresh(req: Request, res: Response): Promise<void> {
+    try {
+      const { refreshToken } = req.body;
+      const result = await AuthService.rotateRefreshToken(refreshToken);
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      const status = err.status || 401;
+      res.status(status).json({
+        error: {
+          code: err.code || 'INVALID_REFRESH_TOKEN',
+          message: err.message || 'Failed to refresh authentication token',
+          details: err.details || {},
+        },
+      });
+    }
+  }
+
   static async logout(req: Request, res: Response): Promise<void> {
     try {
+      const { refreshToken } = req.body || {};
       if (req.sessionToken) {
-        await AuthService.logout(req.sessionToken);
+        await AuthService.logout(req.sessionToken, refreshToken);
       }
       res.status(200).json({
         data: { message: 'Logged out successfully' },
@@ -100,10 +103,68 @@ export class AuthController {
     }
   }
 
+  static async logoutAll(req: Request, res: Response): Promise<void> {
+    try {
+      const result = await AuthService.logoutAll(req.user!.id);
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to log out of all devices',
+          details: {},
+        },
+      });
+    }
+  }
+
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+      const result = await AuthService.forgotPassword(email);
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        error: {
+          code: err.code || 'INTERNAL_SERVER_ERROR',
+          message: err.message || 'An unexpected error occurred during password reset request',
+          details: err.details || {},
+        },
+      });
+    }
+  }
+
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, code, newPassword } = req.body;
+      const result = await AuthService.resetPassword(email, code, newPassword);
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        error: {
+          code: err.code || 'INTERNAL_SERVER_ERROR',
+          message: err.message || 'An unexpected error occurred while resetting password',
+          details: err.details || {},
+        },
+      });
+    }
+  }
+
   static async verifyEmail(req: Request, res: Response): Promise<void> {
     try {
-      const { token } = req.body;
-      const result = await AuthService.verifyEmail(token, req.user!.id);
+      const { code } = req.body;
+      const result = await AuthService.verifyEmail(code, req.user!.id);
       res.status(200).json({
         data: result,
         meta: { timestamp: new Date().toISOString() },
@@ -117,21 +178,6 @@ export class AuthController {
           details: err.details || {},
         },
       });
-    }
-  }
-
-  /**
-   * Public endpoint hit by the emailed verification link. Renders a minimal
-   * HTML page so the user gets feedback in the browser.
-   */
-  static async confirmEmail(req: Request, res: Response): Promise<void> {
-    const token = typeof req.query.token === 'string' ? req.query.token : '';
-    try {
-      await AuthService.verifyEmail(token, req.ip || 'anonymous');
-      res.status(200).type('html').send(confirmPage(true));
-    } catch (err: any) {
-      const status = err.status === 429 ? 429 : 400;
-      res.status(status).type('html').send(confirmPage(false, err.message));
     }
   }
 

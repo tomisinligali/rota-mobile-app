@@ -528,7 +528,7 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     backgroundColor: colors.primary,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     paddingVertical: spacing.md,
     alignItems: 'center',
     marginTop: spacing.sm,

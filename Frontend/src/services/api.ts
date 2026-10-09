@@ -15,7 +15,48 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const refreshToken = await StorageService.getRefreshToken();
+      if (!refreshToken) {
+        await StorageService.clearTokens();
+        return null;
+      }
+
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.data?.accessToken) {
+        await StorageService.clearTokens();
+        return null;
+      }
+
+      const { accessToken, refreshToken: newRefreshToken } = json.data;
+      await StorageService.setTokens({ accessToken, refreshToken: newRefreshToken });
+      return accessToken;
+    } catch {
+      await StorageService.clearTokens();
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
+async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
   const token = await StorageService.getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -36,6 +77,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const json = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    // Transparent token refresh on expired access token or 401 if a refresh token is present
+    const isAuthEndpoint =
+      path.includes('/auth/login') ||
+      path.includes('/auth/register') ||
+      path.includes('/auth/refresh') ||
+      path.includes('/auth/forgot-password') ||
+      path.includes('/auth/reset-password');
+
+    if (response.status === 401 && !isRetry && !isAuthEndpoint && token) {
+      const newAccessToken = await refreshAccessToken();
+      if (newAccessToken) {
+        return await request<T>(path, options, true);
+      }
+    }
+
     const error: ApiError = json.error || {
       code: 'HTTP_ERROR',
       message: `Request failed with status ${response.status}`,
@@ -57,43 +113,107 @@ export const ApiService = {
   },
 
   async register(data: { email: string; password: string; firstName: string; lastName?: string }) {
-    const res = await request<{ user: any; token: string }>('/auth/register', {
+    const res = await request<{ user: any; token: string; accessToken?: string; refreshToken?: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
     });
-    if (res?.token) {
-      await StorageService.setToken(res.token);
+    const accessToken = res?.accessToken || res?.token;
+    if (accessToken) {
+      await StorageService.setTokens({
+        accessToken,
+        refreshToken: res.refreshToken,
+      });
     }
     return res;
   },
 
   async login(data: { email: string; password: string }) {
-    const res = await request<{ user: any; token: string }>('/auth/login', {
+    const res = await request<{ user: any; token: string; accessToken?: string; refreshToken?: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(data),
     });
-    if (res?.token) {
-      await StorageService.setToken(res.token);
+    const accessToken = res?.accessToken || res?.token;
+    if (accessToken) {
+      await StorageService.setTokens({
+        accessToken,
+        refreshToken: res.refreshToken,
+      });
     }
     return res;
   },
 
   async googleLogin(idToken: string) {
-    const res = await request<{ user: any; token: string }>('/auth/google', {
+    const res = await request<{ user: any; token: string; accessToken?: string; refreshToken?: string }>('/auth/google', {
       method: 'POST',
       body: JSON.stringify({ idToken }),
     });
-    if (res?.token) {
-      await StorageService.setToken(res.token);
+    const accessToken = res?.accessToken || res?.token;
+    if (accessToken) {
+      await StorageService.setTokens({
+        accessToken,
+        refreshToken: res.refreshToken,
+      });
     }
     return res;
   },
 
+  /**
+   * Confirms the signed-in user's email using the 6-digit code from the
+   * verification email. Requires the session token from register/login.
+   */
+  async verifyEmail(code: string): Promise<{ emailVerified: boolean }> {
+    return await request<{ emailVerified: boolean }>('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  async resendVerification(): Promise<{ sent?: boolean; alreadyVerified?: boolean }> {
+    return await request<{ sent?: boolean; alreadyVerified?: boolean }>(
+      '/auth/resend-verification',
+      { method: 'POST' }
+    );
+  },
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return await request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string
+  ): Promise<{ success: boolean; message: string }> {
+    return await request<{ success: boolean; message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, newPassword }),
+    });
+  },
+
   async logout(): Promise<void> {
+    const refreshToken = await StorageService.getRefreshToken();
     try {
-      await request('/auth/logout', { method: 'POST' });
+      await request('/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken }),
+      });
+    } catch {
+      // Ignore network errors during logout
     } finally {
-      await StorageService.clearToken();
+      await StorageService.clearTokens();
+    }
+  },
+
+  async logoutAll(): Promise<void> {
+    try {
+      await request('/auth/logout-all', {
+        method: 'POST',
+      });
+    } finally {
+      await StorageService.clearTokens();
     }
   },
 

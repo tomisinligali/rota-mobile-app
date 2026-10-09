@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Warm palette over a vertical purple-to-white backdrop gradient. -->
+  <defs>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <!-- Vertical backdrop gradient: the top half keeps the primaryContainer purple,
+         the bottom half fades to a subtle light-purple tint so the circle edge stays
+         visible against the screen background. -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F1E9FB"/>
+      <stop offset="0.45" stop-color="#F1E9FB"/>
+      <stop offset="1" stop-color="#EBE1F9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="512" height="512" fill="#FFFFFF"/>
+  <circle cx="256" cy="256" r="254" fill="url(#bgGrad)"/>
+  <ellipse cx="256" cy="438" rx="140" ry="24" fill="#2E2B27" opacity="0.10" filter="url(#soft)"/>
+
+  <!-- bell emblem -->
+  <g transform="translate(256 132)">
+    <circle r="52" fill="#FFFFFF" stroke="#6600CC" stroke-width="7"/>
+    <path d="M-20 12 q0 -26 20 -26 q20 0 20 26 l6 12 h-52 z" fill="#6600CC" stroke="#6600CC" stroke-width="6" stroke-linejoin="round"/>
+    <circle cx="0" cy="30" r="6" fill="#6600CC"/>
+  </g>
+
+  <!-- bean bag / seat -->
+  <ellipse cx="262" cy="404" rx="118" ry="46" fill="#C98E2A"/>
+  <ellipse cx="262" cy="392" rx="118" ry="42" fill="#E0A62A"/>
+
+  <!-- seated teammate -->
+  <g>
+    <!-- legs -->
+    <path d="M232 356 q-10 34 4 52 l64 0 q10 -22 0 -52 z" fill="#3F3B33"/>
+    <!-- torso -->
+    <path d="M226 274 q34 -16 68 0 l4 84 q-38 12 -76 0 z" fill="#BFA0EE"/>
+    <!-- left arm holding phone -->
+    <rect x="240" y="300" width="70" height="16" rx="8" fill="#BFA0EE" transform="rotate(16 246 308)"/>
+    <rect x="296" y="300" width="30" height="48" rx="8" fill="#2E2B27"/>
+    <rect x="301" y="306" width="20" height="34" rx="4" fill="#7FD0FF"/>
+    <!-- right arm -->
+    <rect x="284" y="292" width="16" height="64" rx="8" fill="#C9A7F0"/>
+    <!-- neck -->
+    <rect x="252" y="256" width="16" height="18" fill="#B5793B"/>
+    <!-- head -->
+    <circle cx="260" cy="242" r="24" fill="#8C5A3C"/>
+    <!-- hair -->
+    <path d="M236 238 q3 -26 24 -26 q21 0 24 26 q-10 -12 -24 -12 q-14 0 -24 12 z" fill="#2E2B27"/>
+    <!-- shoes -->
+    <rect x="228" y="396" width="26" height="16" rx="8" fill="#E0A62A"/>
+    <rect x="300" y="396" width="26" height="16" rx="8" fill="#E0A62A"/>
+  </g>
+</svg>

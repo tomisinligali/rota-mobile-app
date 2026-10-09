@@ -31,6 +31,7 @@ import {
 } from '../services/queries';
 import { useUiStore } from '../store/uiStore';
 import { Ionicons } from '@expo/vector-icons';
+import { BrandLogo } from '../components/BrandLogo';
 
 interface DashboardScreenProps {
   initialUser?: any;
@@ -644,6 +645,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     onLogout();
   };
 
+  const handleLogoutAll = () => {
+    Alert.alert(
+      'Log Out of All Devices',
+      'This will revoke all active sessions and refresh tokens across all devices. You will need to log in again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log out all',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await ApiService.logoutAll();
+            } catch {
+              // Ignore
+            }
+            onLogout();
+          },
+        },
+      ]
+    );
+  };
+
   const profile = dashboardData?.profile || initialUser || {};
   const userRole = selectedTeam?.userRole || 'STAFF';
   const canManage = userRole === 'OWNER' || userRole === 'MANAGER';
@@ -684,7 +707,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       {/* Top Bar */}
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.brandBadge}>ROTA WORKFORCE</Text>
+          <BrandLogo iconSize={24} textSize={16} />
           <Text style={styles.greeting}>Hello, {profile.firstName || 'User'}</Text>
         </View>
         <View style={styles.topBarRight}>
@@ -899,7 +922,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       {/* Top Bar */}
       <View style={styles.topBar}>
         <View>
-          <Text style={styles.brandBadge}>ROTA WORKFORCE</Text>
+          <BrandLogo iconSize={24} textSize={16} />
           <Text style={styles.greeting}>Hello, {profile.firstName || 'User'}</Text>
         </View>
         <View style={styles.topBarRight}>
@@ -1596,7 +1619,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               {/* PROFILE SUB-SECTION: INFO */}
               {profileSubTab === 'info' && (
                 <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Account & Database Status</Text>
+                  <Text style={styles.cardTitle}>Account Details</Text>
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Account Email:</Text>
                     <Text style={styles.infoValue}>{profile.email || '—'}</Text>
@@ -1619,13 +1642,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     <Text style={styles.infoLabel}>Timezone:</Text>
                     <Text style={styles.infoValue}>{selectedTeam?.timezone || 'UTC'}</Text>
                   </View>
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>Backend Database:</Text>
-                    <Text style={styles.infoValue}>PostgreSQL (Live)</Text>
-                  </View>
 
                   <TouchableOpacity style={styles.profileLogoutBtn} onPress={handleLogout}>
-                    <Text style={styles.profileLogoutText}>Log Out</Text>
+                    <Text style={styles.profileLogoutText}>Log out</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.profileLogoutAllBtn} onPress={handleLogoutAll}>
+                    <Text style={styles.profileLogoutAllText}>Log out of all devices</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -2809,12 +2832,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.lg,
   },
-  brandBadge: {
-    ...typography.labelSmall,
-    color: colors.primary,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
   greeting: {
     ...typography.headlineMedium,
     color: colors.onSurface,
@@ -2846,7 +2863,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   retryText: {
     ...typography.labelSmall,
@@ -2978,7 +2995,7 @@ const styles = StyleSheet.create({
   tabNavRow: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceContainer,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     padding: 3,
     marginBottom: spacing.md,
   },
@@ -2986,15 +3003,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.sm,
     alignItems: 'center',
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   navTabActive: {
     backgroundColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: radius.full,
   },
   navTabText: {
     ...typography.labelSmall,
@@ -3151,7 +3164,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     marginTop: spacing.xs,
   },
   activityRetryBtnText: {
@@ -3248,7 +3261,7 @@ const styles = StyleSheet.create({
   loadMoreBtn: {
     backgroundColor: colors.surfaceContainerHigh,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
     marginTop: spacing.md,
   },
@@ -3457,7 +3470,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   modalSubmitText: {
     ...typography.labelMedium,
@@ -3468,7 +3481,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.secondaryContainer,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   swapShiftBtnText: {
     ...typography.labelSmall,
@@ -3552,7 +3565,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.success,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
   },
   approveSwapBtnText: {
@@ -3564,7 +3577,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.errorContainer,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
   },
   rejectSwapBtnText: {
@@ -3575,7 +3588,7 @@ const styles = StyleSheet.create({
   claimShiftBtn: {
     backgroundColor: colors.primary,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
   },
   claimShiftBtnText: {
@@ -3637,7 +3650,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
   },
   swapTypeBtnActive: {
@@ -3857,7 +3870,7 @@ const styles = StyleSheet.create({
   confirmPlanBtn: {
     backgroundColor: colors.primary,
     paddingVertical: spacing.md,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: 'center',
     marginBottom: spacing.lg,
   },
@@ -4052,7 +4065,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     backgroundColor: colors.surfaceContainerHigh,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   markAllReadText: {
     ...typography.labelSmall,
@@ -4264,7 +4277,7 @@ const styles = StyleSheet.create({
   profileSubTabRow: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceContainer,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     padding: 3,
     marginTop: spacing.sm,
     gap: 4,
@@ -4276,11 +4289,11 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: spacing.sm,
     alignItems: 'center',
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
   },
   profileSubTabActive: {
     backgroundColor: colors.surface,
-    elevation: 2,
+    borderRadius: radius.full,
   },
   profileSubTabText: {
     ...typography.labelMedium,
@@ -4295,12 +4308,26 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     backgroundColor: colors.errorContainer,
     paddingVertical: spacing.md,
-    borderRadius: radius.sm,
+    borderRadius: radius.full,
     alignItems: 'center',
   },
   profileLogoutText: {
     ...typography.labelLarge,
     color: colors.onErrorContainer,
+    fontWeight: '700',
+  },
+  profileLogoutAllBtn: {
+    marginTop: spacing.sm,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.error,
+    paddingVertical: spacing.md,
+    borderRadius: radius.full,
+    alignItems: 'center',
+  },
+  profileLogoutAllText: {
+    ...typography.labelLarge,
+    color: colors.error,
     fontWeight: '700',
   },
   actionPillContentRow: {

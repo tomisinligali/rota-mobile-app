@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Warm palette over a vertical purple-to-white backdrop gradient. -->
+  <defs>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <!-- Vertical backdrop gradient: the top half keeps the primaryContainer purple,
+         the bottom half fades to a subtle light-purple tint so the circle edge stays
+         visible against the screen background. -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F1E9FB"/>
+      <stop offset="0.45" stop-color="#F1E9FB"/>
+      <stop offset="1" stop-color="#EBE1F9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="512" height="512" fill="#FFFFFF"/>
+  <circle cx="256" cy="256" r="254" fill="url(#bgGrad)"/>
+  <ellipse cx="256" cy="440" rx="152" ry="26" fill="#2E2B27" opacity="0.10" filter="url(#soft)"/>
+
+  <!-- swap emblem: same glyph as the app bottom-nav swap tab (Ionicons "swap-horizontal"),
+       in the primary color, framed like the image-3 bell icon, scaled to the bell
+       body's height, and bottom-aligned inside the circle like the bell body -->
+  <g transform="translate(256 123)">
+    <circle r="52" fill="#FFFFFF" stroke="#6600CC" stroke-width="7"/>
+    <g transform="scale(0.13839) translate(-256 -256)">
+      <path d="M304 48l112 112-112 112M398.87 160H96M208 464L96 352l112-112M114 352h302"
+            fill="none" stroke="#6600CC" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- interlocking shift tiles -->
+  <g>
+    <rect x="176" y="266" width="160" height="120" rx="22" fill="#FFFFFF" stroke="#E4DACB" stroke-width="4"/>
+    <rect x="188" y="288" width="64" height="76" rx="14" fill="#E0A62A"/>
+    <rect x="260" y="288" width="64" height="76" rx="14" fill="#6600CC"/>
+  </g>
+
+  <!-- left teammate -->
+  <g>
+    <rect x="120" y="322" width="18" height="58" rx="9" fill="#2E2B27"/>
+    <rect x="142" y="322" width="18" height="58" rx="9" fill="#2E2B27"/>
+    <path d="M112 244 q26 -14 52 0 l6 86 q-32 10 -64 0 z" fill="#BFA0EE"/>
+    <rect x="106" y="252" width="16" height="64" rx="8" fill="#C9A7F0"/>
+    <rect x="154" y="250" width="92" height="16" rx="8" fill="#C9A7F0" transform="rotate(-14 158 258)"/>
+    <circle cx="244" cy="282" r="10" fill="#C68642"/>
+    <rect x="130" y="226" width="16" height="18" fill="#B5793B"/>
+    <circle cx="138" cy="212" r="24" fill="#C68642"/>
+    <path d="M114 208 q3 -26 24 -26 q21 0 24 26 q-10 -12 -24 -12 q-14 0 -24 12 z" fill="#2E2B27"/>
+  </g>
+
+  <!-- right teammate -->
+  <g>
+    <rect x="352" y="322" width="18" height="58" rx="9" fill="#3F3B33"/>
+    <rect x="374" y="322" width="18" height="58" rx="9" fill="#3F3B33"/>
+    <path d="M348 244 q26 -14 52 0 l6 86 q-32 10 -64 0 z" fill="#BFA0EE"/>
+    <rect x="388" y="252" width="16" height="64" rx="8" fill="#C9A7F0"/>
+    <rect x="266" y="250" width="92" height="16" rx="8" fill="#C9A7F0" transform="rotate(14 354 258)"/>
+    <circle cx="266" cy="282" r="10" fill="#8C5A3C"/>
+    <rect x="366" y="226" width="16" height="18" fill="#8C5A3C"/>
+    <circle cx="374" cy="212" r="24" fill="#8C5A3C"/>
+    <path d="M350 208 q3 -26 24 -26 q21 0 24 26 q-10 -12 -24 -12 q-14 0 -24 12 z" fill="#3F3B33"/>
+  </g>
+</svg>

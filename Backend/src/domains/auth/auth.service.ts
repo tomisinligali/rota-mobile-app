@@ -18,9 +18,8 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const BCRYPT_COST = 12;
 
 // Email verification policy (PRD 5.1.1 / AGENTS.md §2.8).
-const VERIFICATION_TOKEN_TTL_MINUTES = 60;
-// 32 random bytes = 256 bits of entropy (AGENTS.md §2.8 requires crypto.randomBytes).
-const VERIFICATION_TOKEN_BYTES = 32;
+const VERIFICATION_CODE_TTL_MINUTES = 60;
+const VERIFICATION_CODE_LENGTH = 6;
 const VERIFICATION_ATTEMPTS_WINDOW_SECONDS = 15 * 60;
 const VERIFICATION_ATTEMPTS_PER_WINDOW = 20;
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -41,16 +40,24 @@ function authError(
 }
 
 /**
- * Generates a cryptographically-random verification token.
- * Uses crypto.randomBytes(32) — 256 bits of entropy — hex-encoded (64 chars).
- * AGENTS.md §2.8 forbids Math.random()/crypto.randomInt() for verification
+ * Generates a cryptographically-random 6-digit verification code.
+ * Uses crypto.randomBytes with rejection sampling so the digits are uniform.
+ * AGENTS.md §2.8 forbids Math.random() and crypto.randomInt() for verification
  * secrets; crypto.randomBytes is the required CSPRNG.
  */
-function generateVerificationToken(): string {
-  return crypto.randomBytes(VERIFICATION_TOKEN_BYTES).toString('hex');
+function generateVerificationCode(): string {
+  const max = 10 ** VERIFICATION_CODE_LENGTH;
+  // Largest multiple of `max` that fits in 32 bits. Values at or above it are
+  // rejected so the final modulo stays unbiased.
+  const limit = Math.floor(0xffffffff / max) * max;
+  let value: number;
+  do {
+    value = crypto.randomBytes(4).readUInt32BE(0);
+  } while (value >= limit);
+  return (value % max).toString().padStart(VERIFICATION_CODE_LENGTH, '0');
 }
 
-// Only the SHA-256 hash of a token is ever persisted or logged.
+// Only the SHA-256 hash of a verification code is ever persisted or logged.
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -65,6 +72,13 @@ export interface RegisterInput {
 export interface LoginInput {
   email: string;
   password: string;
+}
+
+export interface SessionTokens {
+  accessToken: string;
+  refreshToken: string;
+  token: string;
+  expiresIn: number;
 }
 
 export class AuthService {
@@ -119,8 +133,8 @@ export class AuthService {
 
     const user = insertUserRes.rows[0];
 
-    // Create session and token
-    const token = await AuthService.createSession(user.id);
+    // Create session and tokens (short-lived access + refresh)
+    const sessionTokens = await AuthService.createSession(user.id);
 
     // Issue + enqueue the verification email. Delivery is asynchronous and must
     // never fail signup — the user can request a resend if it does not arrive.
@@ -140,7 +154,10 @@ export class AuthService {
         emailVerified: false,
         createdAt: user.created_at,
       },
-      token,
+      token: sessionTokens.token,
+      accessToken: sessionTokens.accessToken,
+      refreshToken: sessionTokens.refreshToken,
+      expiresIn: sessionTokens.expiresIn,
     };
   }
 
@@ -209,7 +226,7 @@ export class AuthService {
       throw error;
     }
 
-    const token = await AuthService.createSession(user.id);
+    const sessionTokens = await AuthService.createSession(user.id);
 
     return {
       user: {
@@ -221,7 +238,10 @@ export class AuthService {
         emailVerified: user.email_verified_at !== null,
         createdAt: user.created_at,
       },
-      token,
+      token: sessionTokens.token,
+      accessToken: sessionTokens.accessToken,
+      refreshToken: sessionTokens.refreshToken,
+      expiresIn: sessionTokens.expiresIn,
     };
   }
 
@@ -292,7 +312,7 @@ export class AuthService {
       throw error;
     }
 
-    const token = await AuthService.createSession(user.id);
+    const sessionTokens = await AuthService.createSession(user.id);
 
     return {
       user: {
@@ -304,25 +324,32 @@ export class AuthService {
         emailVerified: true,
         createdAt: user.created_at,
       },
-      token,
+      token: sessionTokens.token,
+      accessToken: sessionTokens.accessToken,
+      refreshToken: sessionTokens.refreshToken,
+      expiresIn: sessionTokens.expiresIn,
     };
   }
 
-  static async logout(token: string) {
+  static async logout(token: string, refreshToken?: string) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     await query('UPDATE sessions SET revoked_at = NOW() WHERE token_hash = $1', [tokenHash]);
+    if (refreshToken) {
+      const refreshHash = hashToken(refreshToken.trim());
+      await query('UPDATE refresh_tokens SET is_revoked = TRUE WHERE token_hash = $1', [refreshHash]);
+    }
     return { success: true };
   }
 
   /**
-   * Creates a fresh verification token (crypto.randomBytes(32)), invalidating
-   * any prior unconsumed token for the user so exactly one is active at a time.
-   * Returns the plaintext token for delivery; only its SHA-256 hash is stored.
+   * Creates a fresh 6-digit verification code, invalidating any prior
+   * unconsumed code for the user so exactly one is active at a time.
+   * Returns the plaintext code for delivery; only its SHA-256 hash is stored.
    */
-  private static async issueVerificationToken(userId: string): Promise<string> {
-    const token = generateVerificationToken();
-    const tokenHash = hashToken(token);
-    const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MINUTES * 60 * 1000);
+  private static async issueVerificationCode(userId: string): Promise<string> {
+    const code = generateVerificationCode();
+    const codeHash = hashToken(code);
+    const expiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MINUTES * 60 * 1000);
 
     const client = await pool.connect();
     try {
@@ -336,7 +363,7 @@ export class AuthService {
       await client.query(
         `INSERT INTO email_verification_codes (user_id, code_hash, expires_at)
          VALUES ($1, $2, $3)`,
-        [userId, tokenHash, expiresAt]
+        [userId, codeHash, expiresAt]
       );
       await client.query('COMMIT');
     } catch (err) {
@@ -350,36 +377,33 @@ export class AuthService {
       client.release();
     }
 
-    return token;
+    return code;
   }
 
   /**
-   * Persists a new token and enqueues its delivery as a verification link.
-   * The token is never logged or returned to the client.
+   * Persists a new verification code and enqueues its delivery by email.
+   * The code is never logged and is never returned to the client.
    */
   private static async dispatchVerificationEmail(userId: string, email: string): Promise<void> {
-    const token = await AuthService.issueVerificationToken(userId);
-    const baseUrl = (
-      process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || '5001'}`
-    ).replace(/\/+$/, '');
-    const link = `${baseUrl}/api/v1/auth/verify-email/confirm?token=${token}`;
-    await EmailService.sendVerificationLink(email, link, token, VERIFICATION_TOKEN_TTL_MINUTES);
+    const code = await AuthService.issueVerificationCode(userId);
+    await EmailService.sendVerificationCode(email, code, VERIFICATION_CODE_TTL_MINUTES);
   }
 
   /**
-   * Verifies a 32-byte verification token. Tokens are single-use and
-   * time-limited; the conditional UPDATE guarantees single-use under
-   * concurrent requests. The token itself is the credential, so no session is
-   * required (the emailed link calls this).
+   * Verifies a 6-digit code for the authenticated user. Codes are single-use
+   * and time-limited; the conditional UPDATE guarantees single-use under
+   * concurrent requests. The lookup is scoped to the caller's own account, so
+   * the short code space cannot be used to confirm another user's email, and
+   * submissions are rate-limited to blunt guessing.
    */
-  static async verifyEmail(token: string, scopeKey = 'anonymous') {
-    if (!token || !/^[a-f0-9]{64}$/i.test(token.trim())) {
-      throw authError('VALIDATION_ERROR', 'A valid verification token is required', 400);
+  static async verifyEmail(code: string, userId: string) {
+    if (!code || !/^[0-9]{6}$/.test(code.trim())) {
+      throw authError('VALIDATION_ERROR', 'A valid 6-digit verification code is required', 400);
     }
 
     // Rate-limit submissions (Redis fixed window) to blunt online guessing.
     const attemptLimit = await rateLimit(
-      `verify-email:attempts:${scopeKey}`,
+      `verify-email:attempts:${userId}`,
       VERIFICATION_ATTEMPTS_PER_WINDOW,
       VERIFICATION_ATTEMPTS_WINDOW_SECONDS
     );
@@ -389,23 +413,24 @@ export class AuthService {
       });
     }
 
-    const tokenHash = hashToken(token.trim());
-    const tokenRes = await query(
-      `SELECT id, user_id
+    const codeHash = hashToken(code.trim());
+    const codeRes = await query(
+      `SELECT id
        FROM email_verification_codes
-       WHERE code_hash = $1 AND consumed_at IS NULL AND expires_at > NOW()
+       WHERE code_hash = $1 AND user_id = $2 AND consumed_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC
        LIMIT 1`,
-      [tokenHash]
+      [codeHash, userId]
     );
 
-    if (tokenRes.rowCount === 0) {
-      throw authError('INVALID_OR_EXPIRED_CODE', 'This verification link is invalid or has expired', 400);
+    if (codeRes.rowCount === 0) {
+      throw authError('INVALID_OR_EXPIRED_CODE', 'This verification code is invalid or has expired', 400);
     }
 
-    const record = tokenRes.rows[0];
+    const record = codeRes.rows[0];
 
-    // Atomically consume the token and mark the account verified. The
-    // consumed_at IS NULL guard makes the token strictly single-use.
+    // Atomically consume the code and mark the account verified. The
+    // consumed_at IS NULL guard makes the code strictly single-use.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -418,11 +443,11 @@ export class AuthService {
       );
       if (consume.rowCount === 0) {
         await client.query('ROLLBACK');
-        throw authError('INVALID_OR_EXPIRED_CODE', 'This verification link has already been used or has expired', 400);
+        throw authError('INVALID_OR_EXPIRED_CODE', 'This verification code has already been used or has expired', 400);
       }
       await client.query(
         `UPDATE users SET email_verified_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [record.user_id]
+        [userId]
       );
       await client.query('COMMIT');
     } catch (err) {
@@ -476,28 +501,360 @@ export class AuthService {
     return { sent: true };
   }
 
-  private static async createSession(userId: string): Promise<string> {
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + SESSION_EXPIRY_DAYS);
+  static async rotateRefreshToken(oldRefreshToken: string): Promise<SessionTokens> {
+    if (!oldRefreshToken || typeof oldRefreshToken !== 'string') {
+      throw authError('VALIDATION_ERROR', 'Refresh token is required', 400);
+    }
 
-    // Generate JWT token with secure signature
-    const token = jwt.sign(
+    const tokenHash = hashToken(oldRefreshToken.trim());
+    const res = await query(
+      `SELECT id, user_id, family_id, is_revoked, consumed_at, expires_at
+       FROM refresh_tokens
+       WHERE token_hash = $1`,
+      [tokenHash]
+    );
+
+    if (res.rowCount === 0) {
+      throw authError('INVALID_REFRESH_TOKEN', 'Invalid or unrecognized refresh token', 401);
+    }
+
+    const record = res.rows[0];
+
+    // If already explicitly revoked, reject
+    if (record.is_revoked) {
+      throw authError('REFRESH_TOKEN_REVOKED', 'Refresh token has been revoked', 401);
+    }
+
+    // THEFT / REUSE DETECTION:
+    // If a refresh token that has ALREADY been consumed is used again,
+    // this signals the token was compromised / stolen. Immediately revoke
+    // the entire token family and all active sessions for this user.
+    if (record.consumed_at !== null) {
+      await query(
+        `UPDATE refresh_tokens SET is_revoked = TRUE WHERE family_id = $1`,
+        [record.family_id]
+      );
+      await query(
+        `UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1`,
+        [record.user_id]
+      );
+      throw authError(
+        'REFRESH_TOKEN_REUSED',
+        'Refresh token has already been used. Possible token theft detected. All active sessions have been revoked.',
+        401
+      );
+    }
+
+    // Check expiry
+    if (new Date(record.expires_at) < new Date()) {
+      throw authError('REFRESH_TOKEN_EXPIRED', 'Refresh token has expired', 401);
+    }
+
+    // Ensure the user account is still active
+    const userRes = await query(`SELECT id, status FROM users WHERE id = $1`, [record.user_id]);
+    if (userRes.rowCount === 0 || userRes.rows[0].status !== 'ACTIVE') {
+      throw authError('ACCOUNT_DEACTIVATED', 'Your account is deactivated', 403);
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Mark the incoming refresh token as consumed
+      await client.query(
+        `UPDATE refresh_tokens SET consumed_at = NOW() WHERE id = $1`,
+        [record.id]
+      );
+
+      // 2. Create fresh server-side session
+      const sessionExpiresAt = new Date();
+      sessionExpiresAt.setDate(sessionExpiresAt.getDate() + SESSION_EXPIRY_DAYS);
+      const sessionRes = await client.query(
+        `INSERT INTO sessions (user_id, token_hash, expires_at)
+         VALUES ($1, 'pending', $2)
+         RETURNING id`,
+        [record.user_id, sessionExpiresAt]
+      );
+      const newSessionId = sessionRes.rows[0].id;
+
+      // 3. Issue fresh 15-minute access token
+      const accessToken = jwt.sign(
+        {
+          userId: record.user_id,
+          sessionId: newSessionId,
+          issuedAt: Date.now(),
+        },
+        JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+      const accessHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+      await client.query(
+        `UPDATE sessions SET token_hash = $1 WHERE id = $2`,
+        [accessHash, newSessionId]
+      );
+
+      // 4. Issue rotated refresh token belonging to the SAME family
+      const newRefreshToken = crypto.randomBytes(40).toString('hex');
+      const newRefreshHash = hashToken(newRefreshToken);
+      const refreshExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+      await client.query(
+        `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [record.user_id, newRefreshHash, record.family_id, refreshExpiresAt]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        accessToken,
+        refreshToken: newRefreshToken,
+        token: accessToken,
+        expiresIn: 900,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Revokes all active sessions and refresh tokens across all devices for the user.
+   */
+  static async logoutAll(userId: string) {
+    await query(
+      `UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId]
+    );
+    await query(
+      `UPDATE refresh_tokens SET is_revoked = TRUE WHERE user_id = $1 AND is_revoked = FALSE`,
+      [userId]
+    );
+    return { success: true, message: 'Logged out of all devices successfully' };
+  }
+
+  /**
+   * Initiates password reset by issuing a single-use, 15-minute verification code.
+   * Prevents account enumeration by returning a generic message regardless of email existence.
+   */
+  static async forgotPassword(email: string) {
+    if (!email || !email.trim()) {
+      throw authError('VALIDATION_ERROR', 'Email address is required', 400);
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      throw authError('VALIDATION_ERROR', 'Invalid email format', 400);
+    }
+
+    // Rate limit: 5 requests per hour per email to prevent spam/abuse
+    const rl = await rateLimit(`forgot-password:${normalizedEmail}`, 5, 3600);
+    if (!rl.allowed) {
+      throw authError('RATE_LIMIT_EXCEEDED', 'Too many password reset requests. Please try again later.', 429, {
+        retryAfterSeconds: rl.retryAfterSeconds,
+      });
+    }
+
+    const userRes = await query(
+      `SELECT id, email, status FROM users WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    // No account enumeration: return identical generic message if user does not exist
+    if (userRes.rowCount === 0 || userRes.rows[0].status !== 'ACTIVE') {
+      return {
+        message: 'If an account exists with that email, a password reset code has been sent.',
+      };
+    }
+
+    const user = userRes.rows[0];
+    const code = generateVerificationCode();
+    const codeHash = hashToken(code);
+    const ttlMinutes = 15;
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Invalidate any previous unconsumed reset tokens
+      await client.query(
+        `UPDATE password_reset_tokens
+         SET consumed_at = NOW()
+         WHERE user_id = $1 AND consumed_at IS NULL`,
+        [user.id]
+      );
+      await client.query(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.id, codeHash, expiresAt]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    try {
+      await EmailService.sendPasswordReset(user.email, code, ttlMinutes);
+    } catch (err: any) {
+      console.error('Failed to dispatch password reset email:', err.message);
+    }
+
+    return {
+      message: 'If an account exists with that email, a password reset code has been sent.',
+    };
+  }
+
+  /**
+   * Resets the user's password using the single-use expiring token.
+   * On success, updates the password and revokes all active sessions/refresh tokens.
+   */
+  static async resetPassword(email: string, code: string, newPassword: string) {
+    if (!email || !code || !newPassword) {
+      throw authError('VALIDATION_ERROR', 'Email, reset code, and new password are required', 400);
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Password validation (8-64 chars)
+    if (newPassword.length < 8 || newPassword.length > 64) {
+      throw authError('VALIDATION_ERROR', 'Password must be between 8 and 64 characters long', 400);
+    }
+
+    // Rate limit verification attempts: 10 per 15 minutes per email
+    const attemptRl = await rateLimit(`reset-password:attempts:${normalizedEmail}`, 10, 900);
+    if (!attemptRl.allowed) {
+      throw authError('RATE_LIMIT_EXCEEDED', 'Too many attempts. Please try again later.', 429, {
+        retryAfterSeconds: attemptRl.retryAfterSeconds,
+      });
+    }
+
+    const userRes = await query(
+      `SELECT id, email, status FROM users WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    if (userRes.rowCount === 0 || userRes.rows[0].status !== 'ACTIVE') {
+      throw authError('INVALID_RESET_CODE', 'Invalid or expired password reset code', 400);
+    }
+
+    const user = userRes.rows[0];
+    const codeHash = hashToken(code.trim());
+
+    const tokenRes = await query(
+      `SELECT id, user_id, expires_at, consumed_at
+       FROM password_reset_tokens
+       WHERE user_id = $1 AND token_hash = $2`,
+      [user.id, codeHash]
+    );
+
+    if (tokenRes.rowCount === 0) {
+      throw authError('INVALID_RESET_CODE', 'Invalid or expired password reset code', 400);
+    }
+
+    const record = tokenRes.rows[0];
+    if (record.consumed_at !== null) {
+      throw authError('RESET_CODE_ALREADY_USED', 'This password reset code has already been used', 400);
+    }
+
+    if (new Date(record.expires_at) < new Date()) {
+      throw authError('RESET_CODE_EXPIRED', 'Password reset code has expired. Please request a new one.', 400);
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Mark token consumed
+      await client.query(
+        `UPDATE password_reset_tokens SET consumed_at = NOW() WHERE id = $1`,
+        [record.id]
+      );
+
+      // 2. Update user's password
+      await client.query(
+        `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+        [passwordHash, user.id]
+      );
+
+      // 3. Revoke all active sessions and refresh tokens across all devices
+      await client.query(
+        `UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1`,
+        [user.id]
+      );
+      await client.query(
+        `UPDATE refresh_tokens SET is_revoked = TRUE WHERE user_id = $1`,
+        [user.id]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return {
+      success: true,
+      message: 'Password has been reset successfully. Please log in with your new password.',
+    };
+  }
+
+  private static async createSession(userId: string): Promise<SessionTokens> {
+    const sessionExpiresAt = new Date();
+    sessionExpiresAt.setDate(sessionExpiresAt.getDate() + SESSION_EXPIRY_DAYS);
+
+    // 1. Create session in database
+    const sessionRes = await query(
+      `INSERT INTO sessions (user_id, token_hash, expires_at)
+       VALUES ($1, 'pending', $2)
+       RETURNING id`,
+      [userId, sessionExpiresAt]
+    );
+    const sessionId = sessionRes.rows[0].id;
+
+    // 2. Issue 15-minute access token
+    const accessToken = jwt.sign(
       {
         userId,
+        sessionId,
         issuedAt: Date.now(),
       },
       JWT_SECRET,
-      { expiresIn: `${SESSION_EXPIRY_DAYS}d` }
+      { expiresIn: '15m' }
     );
-
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const accessHash = crypto.createHash('sha256').update(accessToken).digest('hex');
 
     await query(
-      `INSERT INTO sessions (user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3)`,
-      [userId, tokenHash, expiresAt]
+      `UPDATE sessions SET token_hash = $1 WHERE id = $2`,
+      [accessHash, sessionId]
     );
 
-    return token;
+    // 3. Issue cryptographically secure refresh token (14 days)
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+    const refreshHash = hashToken(refreshToken);
+    const familyId = crypto.randomUUID();
+    const refreshExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    await query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, refreshHash, familyId, refreshExpiresAt]
+    );
+
+    return {
+      accessToken,
+      refreshToken,
+      token: accessToken,
+      expiresIn: 900,
+    };
   }
 }

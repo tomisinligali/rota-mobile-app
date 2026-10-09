@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { pool, query } from '../../db/pool';
 import { Role } from '../../middleware/rbac';
+import { EmailService } from '../notifications/email.service';
 
 export interface CreateInvitationInput {
   email?: string;
@@ -62,12 +63,32 @@ export class InvitationsService {
     );
 
     const inv = res.rows[0];
+    const deepLink = `rota://invite/${inv.token}`;
+
+    if (inv.email) {
+      try {
+        const teamInfo = await query(
+          `SELECT t.name as team_name, u.first_name, u.last_name
+           FROM teams t, users u
+           WHERE t.id = $1 AND u.id = $2`,
+          [teamId, invitedById]
+        );
+        if (teamInfo.rowCount && teamInfo.rowCount > 0) {
+          const inviter = `${teamInfo.rows[0].first_name} ${teamInfo.rows[0].last_name || ''}`.trim();
+          await EmailService.sendInvitation(inv.email, inviter, teamInfo.rows[0].team_name, inv.token);
+        }
+      } catch (err: any) {
+        console.error('Failed to enqueue invitation email:', err.message);
+      }
+    }
+
     return {
       id: inv.id,
       teamId: inv.team_id,
       email: inv.email,
       role: inv.role,
       token: inv.token,
+      deepLink,
       status: inv.status,
       expiresAt: inv.expires_at,
       createdAt: inv.created_at,

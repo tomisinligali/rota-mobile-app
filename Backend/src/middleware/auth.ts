@@ -42,15 +42,27 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; sessionId?: string };
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Authoritative server-controlled session check
-    const sessionRes = await query(
-      `SELECT s.id, s.user_id, s.expires_at, s.revoked_at,
-              u.id as u_id, u.email, u.first_name, u.last_name, u.status, u.email_verified_at
-       FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,
-      [tokenHash]
-    );
+    // Authoritative server-controlled session check (via sessionId or tokenHash)
+    let sessionRes;
+    if (decoded.sessionId) {
+      sessionRes = await query(
+        `SELECT s.id, s.user_id, s.expires_at, s.revoked_at,
+                u.id as u_id, u.email, u.first_name, u.last_name, u.status, u.email_verified_at
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         WHERE s.id = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,
+        [decoded.sessionId]
+      );
+    } else {
+      sessionRes = await query(
+        `SELECT s.id, s.user_id, s.expires_at, s.revoked_at,
+                u.id as u_id, u.email, u.first_name, u.last_name, u.status, u.email_verified_at
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,
+        [tokenHash]
+      );
+    }
 
     if (sessionRes.rowCount === 0) {
       res.status(401).json({
@@ -86,7 +98,17 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     req.sessionToken = token;
 
     next();
-  } catch (err) {
+  } catch (err: any) {
+    if (err.name === 'TokenExpiredError') {
+      res.status(401).json({
+        error: {
+          code: 'ACCESS_TOKEN_EXPIRED',
+          message: 'Access token has expired',
+          details: {},
+        },
+      });
+      return;
+    }
     res.status(401).json({
       error: {
         code: 'INVALID_TOKEN',

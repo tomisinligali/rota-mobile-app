@@ -31,6 +31,59 @@ export class InvitationsService {
       throw err;
     }
 
+    // Enforce server-side seat limits: An owner on Starter cannot invite a sixth person
+    if (role === 'STAFF') {
+      const teamRes = await query('SELECT business_id FROM teams WHERE id = $1', [teamId]);
+      if (teamRes.rowCount && teamRes.rowCount > 0) {
+        const businessId = teamRes.rows[0].business_id;
+        const subRes = await query(
+          'SELECT plan_tier, seat_count, status FROM subscriptions WHERE business_id = $1',
+          [businessId]
+        );
+
+        if (subRes.rowCount && subRes.rowCount > 0) {
+          const sub = subRes.rows[0];
+          if (sub.status === 'RESTRICTED') {
+            const err: any = new Error(
+              'Your subscription is restricted due to past due payments. Please update your billing to invite staff.'
+            );
+            err.code = 'SUBSCRIPTION_RESTRICTED';
+            err.status = 403;
+            throw err;
+          }
+
+          // Active staff seats across all teams for this business
+          const staffCountRes = await query(
+            `SELECT COUNT(DISTINCT tm.user_id) as active_staff
+             FROM team_memberships tm
+             JOIN teams t ON t.id = tm.team_id
+             WHERE t.business_id = $1 AND tm.role = 'STAFF' AND tm.status = 'ACTIVE'`,
+            [businessId]
+          );
+          const activeStaff = parseInt(staffCountRes.rows[0]?.active_staff || '0', 10);
+
+          // Pending unexpired invitations for this business
+          const pendingRes = await query(
+            `SELECT COUNT(*) as pending_count
+             FROM invitations i
+             JOIN teams t ON t.id = i.team_id
+             WHERE t.business_id = $1 AND i.role = 'STAFF' AND i.status = 'PENDING' AND i.expires_at > NOW()`,
+            [businessId]
+          );
+          const pendingCount = parseInt(pendingRes.rows[0]?.pending_count || '0', 10);
+
+          if (activeStaff + pendingCount >= sub.seat_count) {
+            const err: any = new Error(
+              `Seat limit reached (${activeStaff + pendingCount}/${sub.seat_count} seats allocated). An owner on the ${sub.plan_tier} plan cannot invite additional staff. Please upgrade your subscription.`
+            );
+            err.code = 'SEAT_LIMIT_REACHED';
+            err.status = 403;
+            throw err;
+          }
+        }
+      }
+    }
+
     // Check if email already belongs to team
     if (email) {
       const existingMember = await query(
@@ -173,6 +226,46 @@ export class InvitationsService {
         err.code = isExpired ? 'INVITATION_EXPIRED' : 'INVITATION_ALREADY_USED';
         err.status = 400;
         throw err;
+      }
+
+      // If accepting a STAFF role, verify current business seat limit inside transaction
+      if (inv.role === 'STAFF') {
+        const teamRes = await client.query('SELECT business_id FROM teams WHERE id = $1', [inv.team_id]);
+        if (teamRes.rowCount && teamRes.rowCount > 0) {
+          const businessId = teamRes.rows[0].business_id;
+          const subRes = await client.query(
+            'SELECT plan_tier, seat_count, status FROM subscriptions WHERE business_id = $1 FOR UPDATE',
+            [businessId]
+          );
+          if (subRes.rowCount && subRes.rowCount > 0) {
+            const sub = subRes.rows[0];
+            if (sub.status === 'RESTRICTED') {
+              const err: any = new Error(
+                'This team subscription is restricted due to payment issues. Cannot accept membership at this time.'
+              );
+              err.code = 'SUBSCRIPTION_RESTRICTED';
+              err.status = 403;
+              throw err;
+            }
+
+            const staffCountRes = await client.query(
+              `SELECT COUNT(DISTINCT tm.user_id) as active_staff
+               FROM team_memberships tm
+               JOIN teams t ON t.id = tm.team_id
+               WHERE t.business_id = $1 AND tm.role = 'STAFF' AND tm.status = 'ACTIVE'`,
+              [businessId]
+            );
+            const activeStaff = parseInt(staffCountRes.rows[0]?.active_staff || '0', 10);
+            if (activeStaff >= sub.seat_count) {
+              const err: any = new Error(
+                `The ${sub.plan_tier} plan has reached its seat limit (${activeStaff}/${sub.seat_count} seats). The owner must upgrade to activate more staff.`
+              );
+              err.code = 'SEAT_LIMIT_REACHED';
+              err.status = 403;
+              throw err;
+            }
+          }
+        }
       }
 
       // Check if user is already a member

@@ -5,7 +5,11 @@ export class AuthController {
   static async register(req: Request, res: Response): Promise<void> {
     try {
       const { email, password, firstName, lastName } = req.body;
-      const result = await AuthService.register({ email, password, firstName, lastName });
+      const idempotencyKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
+      const result = await AuthService.register({ email, password, firstName, lastName }, idempotencyKey);
+      if (idempotencyKey) {
+        res.setHeader('Idempotency-Key', idempotencyKey);
+      }
       res.status(201).json({
         data: result,
         meta: { timestamp: new Date().toISOString() },

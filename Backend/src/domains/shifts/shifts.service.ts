@@ -1,5 +1,6 @@
 import { pool, query } from '../../db/pool';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BillingService } from '../billing/billing.service';
 
 export interface CreateShiftInput {
   assignedToId?: string;
@@ -46,6 +47,12 @@ export class ShiftsService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Enforce billing status: restricted subscription blocks scheduling mutations
+      const teamRes = await client.query('SELECT business_id FROM teams WHERE id = $1', [teamId]);
+      if (teamRes.rowCount && teamRes.rowCount > 0) {
+        await BillingService.assertCanSchedule(teamRes.rows[0].business_id);
+      }
 
       let assigneeName = 'Open Shift';
       if (assignedToId) {
@@ -225,6 +232,13 @@ export class ShiftsService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      if (newStatus !== 'CANCELLED') {
+        const teamRes = await client.query('SELECT business_id FROM teams WHERE id = $1', [teamId]);
+        if (teamRes.rowCount && teamRes.rowCount > 0) {
+          await BillingService.assertCanSchedule(teamRes.rows[0].business_id);
+        }
+      }
 
       // Check overlap if assignee or times changed
       if (newAssignedToId && newStatus !== 'CANCELLED') {

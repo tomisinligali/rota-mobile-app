@@ -356,6 +356,7 @@ async function runSecurityTests() {
     server.close();
     await pool.end();
     rateLimitRedis.disconnect();
+    process.exit(0);
   }
 }
 

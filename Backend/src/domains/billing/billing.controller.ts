@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { BillingService } from './billing.service';
+import { billingWebhookQueue } from './billing.queue';
 import { query } from '../../db/pool';
 
 export class BillingController {
@@ -90,6 +91,10 @@ export class BillingController {
       const user = req.user!;
       const businessId = String(req.params.businessId);
       const { newPlanTier, newSeatCount } = req.body;
+      const idempotencyKey =
+        (req.headers['idempotency-key'] as string) ||
+        (req.headers['x-idempotency-key'] as string) ||
+        undefined;
 
       const isOwner = await BillingController.verifyBusinessOwner(user.id, businessId);
       if (!isOwner) {
@@ -106,6 +111,7 @@ export class BillingController {
       const result = await BillingService.updateSubscription(businessId, user.id, {
         newPlanTier,
         newSeatCount: parseInt(newSeatCount, 10),
+        idempotencyKey,
       });
 
       res.status(200).json({
@@ -126,11 +132,38 @@ export class BillingController {
   static async handleWebhook(req: Request, res: Response): Promise<void> {
     try {
       const signature = req.headers['verif-hash'] as string | undefined;
-      const result = await BillingService.handleFlutterwaveWebhook(req.body, signature);
+      const secretHash = process.env.FLUTTERWAVE_SECRET_HASH || 'test-flutterwave-secret-hash';
+      if (signature && signature !== secretHash) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Invalid Flutterwave webhook signature',
+            details: {},
+          },
+        });
+        return;
+      }
+
+      const payload = req.body;
+      const providerEventId = String(
+        payload.id || payload.data?.id || payload.event_id || `flw_${Date.now()}`
+      );
+
+      // Queue for asynchronous background processing via BullMQ
+      await billingWebhookQueue.add(
+        'flw-webhook',
+        {
+          providerEventId,
+          payload,
+          signature,
+          receivedAt: new Date().toISOString(),
+        },
+        { jobId: providerEventId }
+      );
 
       res.status(200).json({
-        status: 'success',
-        result,
+        status: 'queued',
+        providerEventId,
       });
     } catch (err: any) {
       res.status(err.status || 400).json({

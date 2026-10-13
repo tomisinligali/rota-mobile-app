@@ -534,7 +534,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   submitButtonDisabled: {
-    opacity: 0.6,
+    opacity: 0.38,
   },
   submitButtonText: {
     ...typography.labelLarge,

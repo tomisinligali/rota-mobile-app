@@ -744,49 +744,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 Active timezone: {selectedTeam.timezone || 'UTC'}
               </Text>
             </View>
-            <View
-              style={[
-                styles.roleBadgeHeader,
-                userRole === 'OWNER'
-                  ? styles.roleOwner
-                  : userRole === 'MANAGER'
-                  ? styles.roleManager
-                  : styles.roleStaff,
-              ]}
-            >
-              <Ionicons
-                name={
-                  userRole === 'OWNER'
-                    ? 'shield-checkmark'
-                    : userRole === 'MANAGER'
-                    ? 'shield'
-                    : 'person'
-                }
-                size={13}
-                color={
-                  userRole === 'OWNER'
-                    ? colors.onPrimaryContainer
-                    : userRole === 'MANAGER'
-                    ? colors.info
-                    : colors.onSuccessContainer
-                }
-              />
-              <Text
-                style={[
-                  styles.roleBadgeHeaderText,
-                  {
-                    color:
-                      userRole === 'OWNER'
-                        ? colors.onPrimaryContainer
-                        : userRole === 'MANAGER'
-                        ? colors.info
-                        : colors.onSuccessContainer,
-                  },
-                ]}
-              >
-                {userRole}
-              </Text>
-            </View>
           </View>
         </View>
       )}
@@ -881,8 +838,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       return null;
     }
     return (
-      <View style={styles.activityCenterBox}>
-        <Ionicons name="newspaper-outline" size={44} color={colors.onSurfaceVariant} />
+      <View style={styles.emptyBox}>
+        <Ionicons name="newspaper-outline" size={40} color={colors.onSurfaceVariant} />
         <Text style={styles.emptyText}>No activity recorded yet</Text>
         <Text style={styles.emptySubtext}>
           When team members schedule shifts or request swaps, events will appear here in real time.
@@ -974,51 +931,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                   Active timezone: {selectedTeam?.timezone || 'UTC'}
                 </Text>
               </View>
-              {selectedTeam && (
-                <View
-                  style={[
-                    styles.roleBadgeHeader,
-                    userRole === 'OWNER'
-                      ? styles.roleOwner
-                      : userRole === 'MANAGER'
-                      ? styles.roleManager
-                      : styles.roleStaff,
-                  ]}
-                >
-                  <Ionicons
-                    name={
-                      userRole === 'OWNER'
-                        ? 'shield-checkmark'
-                        : userRole === 'MANAGER'
-                        ? 'shield'
-                        : 'person'
-                    }
-                    size={13}
-                    color={
-                      userRole === 'OWNER'
-                        ? colors.onPrimaryContainer
-                        : userRole === 'MANAGER'
-                        ? colors.info
-                        : colors.onSuccessContainer
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.roleBadgeHeaderText,
-                      {
-                        color:
-                          userRole === 'OWNER'
-                            ? colors.onPrimaryContainer
-                            : userRole === 'MANAGER'
-                            ? colors.info
-                            : colors.onSuccessContainer,
-                      },
-                    ]}
-                  >
-                    {userRole}
-                  </Text>
-                </View>
-              )}
             </View>
 
             {/* If user belongs to multiple teams (backend capability preserved), show subtle selector */}
@@ -1045,18 +957,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     >
                       {t.name}
                     </Text>
-                    <View
-                      style={[
-                        styles.roleBadge,
-                        t.userRole === 'OWNER'
-                          ? styles.roleOwner
-                          : t.userRole === 'MANAGER'
-                          ? styles.roleManager
-                          : styles.roleStaff,
-                      ]}
-                    >
-                      <Text style={styles.roleBadgeText}>{t.userRole}</Text>
-                    </View>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -1064,7 +964,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
 
             {teams.length === 0 && (
               <View style={styles.emptyBox}>
-                <Text style={styles.emptyText}>You do not belong to any team yet.</Text>
+                <Ionicons name="people-outline" size={40} color={colors.onSurfaceVariant} />
+                <Text style={styles.emptyText}>You do not belong to any team yet</Text>
                 <Text style={styles.emptySubtext}>
                   Please create a team or join using an invite code.
                 </Text>
@@ -1114,7 +1015,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
 
               {shifts.length === 0 ? (
                 <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>No shifts scheduled yet.</Text>
+                  <Ionicons name="calendar-outline" size={40} color={colors.onSurfaceVariant} />
+                  <Text style={styles.emptyText}>No shifts scheduled yet</Text>
                   <Text style={styles.emptySubtext}>
                     {canManage
                       ? 'Tap "+ Add Shift" above to schedule your staff members.'
@@ -1207,202 +1109,219 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 </View>
               </View>
 
-              {/* Section 1: Pending Approvals */}
-              <View style={styles.sectionHeadingRow}>
-                <Ionicons name="hourglass-outline" size={18} color={colors.primary} />
-                <Text style={styles.sectionHeading}>
-                  Pending Approvals ({teamSwaps.filter((sw) => sw.status === 'REQUESTED').length})
-                </Text>
-              </View>
-
-              {teamSwaps.filter((sw) => sw.status === 'REQUESTED').length === 0 ? (
+              {teamSwaps.length === 0 ? (
                 <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>No pending swap requests.</Text>
+                  <Ionicons name="swap-horizontal-outline" size={40} color={colors.onSurfaceVariant} />
+                  <Text style={styles.emptyText}>No shift swaps yet</Text>
                   <Text style={styles.emptySubtext}>
-                    When staff propose swaps or claim open shifts, they appear here for manager review.
+                    When staff members propose swaps or offer open shifts, requests and history will appear here.
                   </Text>
                 </View>
               ) : (
-                teamSwaps
-                  .filter((sw) => sw.status === 'REQUESTED')
-                  .map((sw) => {
-                    const shiftStart = new Date(sw.shift.startTime);
-                    const shiftEnd = new Date(sw.shift.endTime);
-                    const isClaimedOpenShift = sw.type === 'OPEN_SHIFT' && sw.targetUser;
-                    const isUnclaimedOpenShift = sw.type === 'OPEN_SHIFT' && !sw.targetUser;
+                <>
+                  {/* Section 1: Pending Approvals */}
+                  <View style={styles.sectionHeadingRow}>
+                    <Ionicons name="hourglass-outline" size={18} color={colors.primary} />
+                    <Text style={styles.sectionHeading}>
+                      Pending Approvals ({teamSwaps.filter((sw) => sw.status === 'REQUESTED').length})
+                    </Text>
+                  </View>
 
-                    return (
-                      <View key={sw.id} style={styles.swapCard}>
-                        <View style={styles.swapHeaderRow}>
-                          <View
-                            style={[
-                              styles.swapTypeBadge,
-                              sw.type === 'DIRECT_SWAP'
-                                ? styles.swapTypeDirect
-                                : styles.swapTypeOpen,
-                            ]}
-                          >
-                            <Text style={styles.swapTypeBadgeText}>
-                              {sw.type === 'DIRECT_SWAP'
-                                ? 'DIRECT SWAP'
-                                : isClaimedOpenShift
-                                ? 'OPEN SHIFT (CLAIMED)'
-                                : 'OPEN SHIFT (OFFERED)'}
-                            </Text>
-                          </View>
-                          <Text style={styles.swapTimestamp}>
-                            {new Date(sw.requestedAt).toLocaleDateString([], {
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </Text>
-                        </View>
+                  {teamSwaps.filter((sw) => sw.status === 'REQUESTED').length === 0 ? (
+                    <View style={styles.emptyBox}>
+                      <Ionicons name="hourglass-outline" size={40} color={colors.onSurfaceVariant} />
+                      <Text style={styles.emptyText}>No pending swap requests</Text>
+                      <Text style={styles.emptySubtext}>
+                        When staff propose swaps or claim open shifts, they appear here for manager review.
+                      </Text>
+                    </View>
+                  ) : (
+                    teamSwaps
+                      .filter((sw) => sw.status === 'REQUESTED')
+                      .map((sw) => {
+                        const shiftStart = new Date(sw.shift.startTime);
+                        const shiftEnd = new Date(sw.shift.endTime);
+                        const isClaimedOpenShift = sw.type === 'OPEN_SHIFT' && sw.targetUser;
+                        const isUnclaimedOpenShift = sw.type === 'OPEN_SHIFT' && !sw.targetUser;
 
-                        <Text style={styles.swapShiftTitle}>
-                          {sw.shift.roleName} Shift
-                        </Text>
-                        <Text style={styles.swapShiftTime}>
-                          {shiftStart.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} •{' '}
-                          {shiftStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
-                          {shiftEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-
-                        <View style={styles.swapParticipantsBox}>
-                          <Text style={styles.swapParticipantText}>
-                            <Text style={{ fontWeight: '700' }}>Offered by: </Text>
-                            {sw.requester.name}
-                          </Text>
-                          {sw.targetUser ? (
-                            <Text style={styles.swapParticipantText}>
-                              <Text style={{ fontWeight: '700' }}>
-                                {sw.type === 'DIRECT_SWAP' ? 'Proposed Recipient: ' : 'Claimed by: '}
-                              </Text>
-                              {sw.targetUser.name}
-                            </Text>
-                          ) : (
-                            <Text style={styles.swapParticipantText}>
-                              <Text style={{ fontWeight: '700' }}>Recipient: </Text>
-                              Anyone on team (Unclaimed)
-                            </Text>
-                          )}
-                          {sw.reason ? (
-                            <Text style={styles.swapReasonText}>Reason: "{sw.reason}"</Text>
-                          ) : null}
-                        </View>
-
-                        {/* Actions */}
-                        {canManage ? (
-                          <View style={styles.swapActionRow}>
-                            <TouchableOpacity
-                              style={[
-                                styles.approveSwapBtn,
-                                processingSwapId === sw.id && { opacity: 0.6 },
-                              ]}
-                              onPress={() => handleApproveSwap(sw.id)}
-                              disabled={processingSwapId === sw.id}
-                            >
-                              <View style={styles.btnRow}>
-                                <Ionicons name="checkmark-circle-outline" size={16} color={colors.onPrimary} />
-                                <Text style={styles.approveSwapBtnText}>
-                                  {processingSwapId === sw.id ? 'Processing...' : 'Approve Swap'}
+                        return (
+                          <View key={sw.id} style={styles.swapCard}>
+                            <View style={styles.swapHeaderRow}>
+                              <View
+                                style={[
+                                  styles.swapTypeBadge,
+                                  sw.type === 'DIRECT_SWAP'
+                                    ? styles.swapTypeDirect
+                                    : styles.swapTypeOpen,
+                                ]}
+                              >
+                                <Text style={styles.swapTypeBadgeText}>
+                                  {sw.type === 'DIRECT_SWAP'
+                                    ? 'DIRECT SWAP'
+                                    : isClaimedOpenShift
+                                    ? 'OPEN SHIFT (CLAIMED)'
+                                    : 'OPEN SHIFT (OFFERED)'}
                                 </Text>
                               </View>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={[
-                                styles.rejectSwapBtn,
-                                processingSwapId === sw.id && { opacity: 0.6 },
-                              ]}
-                              onPress={() => handleRejectSwap(sw.id)}
-                              disabled={processingSwapId === sw.id}
-                            >
-                              <View style={styles.btnRow}>
-                                <Ionicons name="close-circle-outline" size={16} color={colors.onErrorContainer} />
-                                <Text style={styles.rejectSwapBtnText}>Decline</Text>
-                              </View>
-                            </TouchableOpacity>
-                          </View>
-                        ) : isUnclaimedOpenShift &&
-                          sw.requester.id !== (dashboardData?.profile?.id || initialUser?.id) ? (
-                          <TouchableOpacity
-                            style={[
-                              styles.claimShiftBtn,
-                              processingSwapId === sw.id && { opacity: 0.6 },
-                            ]}
-                            onPress={() => handleClaimOpenShift(sw.id)}
-                            disabled={processingSwapId === sw.id}
-                          >
-                            <View style={styles.btnRow}>
-                              <Ionicons name="hand-right-outline" size={16} color={colors.onPrimary} />
-                              <Text style={styles.claimShiftBtnText}>
-                                {processingSwapId === sw.id ? 'Claiming...' : 'Claim This Shift'}
+                              <Text style={styles.swapTimestamp}>
+                                {new Date(sw.requestedAt).toLocaleDateString([], {
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
                               </Text>
                             </View>
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={styles.statusWaitBadge}>
-                            <Text style={styles.statusWaitText}>
-                              {isUnclaimedOpenShift
-                                ? 'Available for eligible team members to claim'
-                                : 'Awaiting Manager Review & Confirmation'}
+
+                            <Text style={styles.swapShiftTitle}>
+                              {sw.shift.roleName} Shift
+                            </Text>
+                            <Text style={styles.swapShiftTime}>
+                              {shiftStart.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} •{' '}
+                              {shiftStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
+                              {shiftEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+
+                            <View style={styles.swapParticipantsBox}>
+                              <Text style={styles.swapParticipantText}>
+                                <Text style={{ fontWeight: '700' }}>Offered by: </Text>
+                                {sw.requester.name}
+                              </Text>
+                              {sw.targetUser ? (
+                                <Text style={styles.swapParticipantText}>
+                                  <Text style={{ fontWeight: '700' }}>
+                                    {sw.type === 'DIRECT_SWAP' ? 'Proposed Recipient: ' : 'Claimed by: '}
+                                  </Text>
+                                  {sw.targetUser.name}
+                                </Text>
+                              ) : (
+                                <Text style={styles.swapParticipantText}>
+                                  <Text style={{ fontWeight: '700' }}>Recipient: </Text>
+                                  Anyone on team (Unclaimed)
+                                </Text>
+                              )}
+                              {sw.reason ? (
+                                <Text style={styles.swapReasonText}>Reason: "{sw.reason}"</Text>
+                              ) : null}
+                            </View>
+
+                            {/* Actions */}
+                            {canManage ? (
+                              <View style={styles.swapActionRow}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.approveSwapBtn,
+                                    processingSwapId === sw.id && styles.submitButtonDisabled,
+                                  ]}
+                                  onPress={() => handleApproveSwap(sw.id)}
+                                  disabled={processingSwapId === sw.id}
+                                >
+                                  <View style={styles.btnRow}>
+                                    <Ionicons name="checkmark-circle-outline" size={16} color={colors.onPrimary} />
+                                    <Text style={styles.approveSwapBtnText}>
+                                      {processingSwapId === sw.id ? 'Processing...' : 'Approve Swap'}
+                                    </Text>
+                                  </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.rejectSwapBtn,
+                                    processingSwapId === sw.id && styles.submitButtonDisabled,
+                                  ]}
+                                  onPress={() => handleRejectSwap(sw.id)}
+                                  disabled={processingSwapId === sw.id}
+                                >
+                                  <View style={styles.btnRow}>
+                                    <Ionicons name="close-circle-outline" size={16} color={colors.onErrorContainer} />
+                                    <Text style={styles.rejectSwapBtnText}>Decline</Text>
+                                  </View>
+                                </TouchableOpacity>
+                              </View>
+                            ) : isUnclaimedOpenShift &&
+                              sw.requester.id !== (dashboardData?.profile?.id || initialUser?.id) ? (
+                              <TouchableOpacity
+                                style={[
+                                  styles.claimShiftBtn,
+                                  processingSwapId === sw.id && styles.submitButtonDisabled,
+                                ]}
+                                onPress={() => handleClaimOpenShift(sw.id)}
+                                disabled={processingSwapId === sw.id}
+                              >
+                                <View style={styles.btnRow}>
+                                  <Ionicons name="hand-right-outline" size={16} color={colors.onPrimary} />
+                                  <Text style={styles.claimShiftBtnText}>
+                                    {processingSwapId === sw.id ? 'Claiming...' : 'Claim This Shift'}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            ) : (
+                              <View style={styles.statusWaitBadge}>
+                                <Text style={styles.statusWaitText}>
+                                  {isUnclaimedOpenShift
+                                    ? 'Available for eligible team members to claim'
+                                    : 'Awaiting Manager Review & Confirmation'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })
+                  )}
+
+                  {/* Section 2: Recent Resolved Swaps */}
+                  <View style={[styles.sectionHeadingRow, { marginTop: spacing.xl }]}>
+                    <Ionicons name="time-outline" size={18} color={colors.primary} />
+                    <Text style={styles.sectionHeading}>
+                      Swap History ({teamSwaps.filter((sw) => sw.status !== 'REQUESTED').length})
+                    </Text>
+                  </View>
+
+                  {teamSwaps.filter((sw) => sw.status !== 'REQUESTED').length === 0 ? (
+                    <View style={styles.emptyBox}>
+                      <Ionicons name="time-outline" size={40} color={colors.onSurfaceVariant} />
+                      <Text style={styles.emptyText}>No swap history yet</Text>
+                      <Text style={styles.emptySubtext}>
+                        Resolved shift swaps and claimed open shifts will be archived here.
+                      </Text>
+                    </View>
+                  ) : (
+                    teamSwaps
+                      .filter((sw) => sw.status !== 'REQUESTED')
+                      .slice(0, 10)
+                      .map((sw) => (
+                        <View key={sw.id} style={styles.historySwapRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.historySwapTitle}>
+                              {sw.shift.roleName} ({sw.requester.name} to {sw.targetUser?.name || 'Open'})
+                            </Text>
+                            <Text style={styles.historySwapSub}>
+                              {new Date(sw.shift.startTime).toLocaleDateString([], {
+                                month: 'short',
+                                day: 'numeric',
+                              })}{' '}
+                              • {sw.type}
                             </Text>
                           </View>
-                        )}
-                      </View>
-                    );
-                  })
-              )}
-
-              {/* Section 2: Recent Resolved Swaps */}
-              <View style={[styles.sectionHeadingRow, { marginTop: spacing.xl }]}>
-                <Ionicons name="time-outline" size={18} color={colors.primary} />
-                <Text style={styles.sectionHeading}>
-                  Swap History ({teamSwaps.filter((sw) => sw.status !== 'REQUESTED').length})
-                </Text>
-              </View>
-
-              {teamSwaps.filter((sw) => sw.status !== 'REQUESTED').length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>No swap history yet.</Text>
-                </View>
-              ) : (
-                teamSwaps
-                  .filter((sw) => sw.status !== 'REQUESTED')
-                  .slice(0, 10)
-                  .map((sw) => (
-                    <View key={sw.id} style={styles.historySwapRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.historySwapTitle}>
-                          {sw.shift.roleName} ({sw.requester.name} to {sw.targetUser?.name || 'Open'})
-                        </Text>
-                        <Text style={styles.historySwapSub}>
-                          {new Date(sw.shift.startTime).toLocaleDateString([], {
-                            month: 'short',
-                            day: 'numeric',
-                          })}{' '}
-                          • {sw.type}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.roleBadge,
-                          sw.status === 'EXECUTED'
-                            ? styles.badgeSuccess
-                            : styles.roleOwner,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.roleBadgeText,
-                            sw.status === 'EXECUTED' && styles.badgeSuccessText,
-                          ]}
-                        >
-                          {sw.status}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
+                          <View
+                            style={[
+                              styles.roleBadge,
+                              sw.status === 'EXECUTED'
+                                ? styles.badgeSuccess
+                                : styles.roleOwner,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.roleBadgeText,
+                                sw.status === 'EXECUTED' && styles.badgeSuccessText,
+                              ]}
+                            >
+                              {sw.status}
+                            </Text>
+                          </View>
+                        </View>
+                      ))
+                  )}
+                </>
               )}
             </View>
           )}
@@ -1436,46 +1355,55 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               </View>
 
               <View style={styles.membersList}>
-                {teamMembers.map((member) => (
-                  <View key={member.membershipId} style={styles.memberRow}>
-                    <View style={styles.memberInfo}>
-                      <Text style={styles.memberName}>
-                        {member.firstName} {member.lastName || ''}
-                      </Text>
-                      <Text style={styles.memberEmail}>{member.email}</Text>
-                    </View>
+                {teamMembers.map((member) => {
+                  const canRemove =
+                    canManage &&
+                    member.role !== 'OWNER' &&
+                    member.userId !== profile.id &&
+                    !(userRole === 'MANAGER' && member.role === 'MANAGER');
+                  // Owner dashboard keeps a bare delete icon (no red pill).
+                  const isOwnerView = userRole === 'OWNER';
 
-                    <View style={styles.memberRoleContainer}>
-                      <View
-                        style={[
-                          styles.roleBadge,
-                          member.role === 'OWNER'
-                            ? styles.roleOwner
-                            : member.role === 'MANAGER'
-                            ? styles.roleManager
-                            : styles.roleStaff,
-                        ]}
-                      >
-                        <Text style={styles.roleBadgeText}>{member.role}</Text>
+                  return (
+                    <View key={member.membershipId} style={styles.memberRow}>
+                      <View style={styles.memberInfo}>
+                        <View style={styles.memberNameRow}>
+                          <Text style={styles.memberName} numberOfLines={1}>
+                            {member.firstName} {member.lastName || ''}
+                          </Text>
+                          <View
+                            style={[
+                              styles.roleBadge,
+                              member.role === 'OWNER'
+                                ? styles.roleOwner
+                                : member.role === 'MANAGER'
+                                ? styles.roleManager
+                                : styles.roleStaff,
+                            ]}
+                          >
+                            <Text style={styles.roleBadgeText}>{member.role}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.memberEmail}>{member.email}</Text>
                       </View>
 
-                      {/* Remove control mirrors backend rules: OWNER protected, no self, managers cannot remove managers. */}
-                      {canManage &&
-                        member.role !== 'OWNER' &&
-                        member.userId !== profile.id &&
-                        !(userRole === 'MANAGER' && member.role === 'MANAGER') && (
+                      <View style={styles.memberRoleContainer}>
+                        {/* Remove control mirrors backend rules: OWNER protected, no self, managers cannot remove managers. */}
+                        {canRemove && (
                           <TouchableOpacity
-                            style={styles.removePill}
+                            style={[styles.removePill, isOwnerView && styles.removeIconOnly]}
                             onPress={() => handleRemoveMember(member)}
                             accessibilityRole="button"
                             accessibilityLabel={`Remove ${member.firstName} ${member.lastName || ''} from team`}
+                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                           >
-                            <Text style={styles.removePillText}>Remove</Text>
+                            <Ionicons name="trash-outline" size={16} color={colors.onErrorContainer} />
                           </TouchableOpacity>
                         )}
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
           )}
@@ -1496,51 +1424,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                       {profile.firstName || 'User'} {profile.lastName || ''}
                     </Text>
                     <Text style={styles.profileEmail}>{profile.email || '—'}</Text>
-                    <View style={styles.profileBadgeContainer}>
-                      <View
-                        style={[
-                          styles.roleBadgeHeader,
-                          userRole === 'OWNER'
-                            ? styles.roleOwner
-                            : userRole === 'MANAGER'
-                            ? styles.roleManager
-                            : styles.roleStaff,
-                        ]}
-                      >
-                        <Ionicons
-                          name={
-                            userRole === 'OWNER'
-                              ? 'shield-checkmark'
-                              : userRole === 'MANAGER'
-                              ? 'shield'
-                              : 'person'
-                          }
-                          size={13}
-                          color={
-                            userRole === 'OWNER'
-                              ? colors.onPrimaryContainer
-                              : userRole === 'MANAGER'
-                              ? colors.info
-                              : colors.onSuccessContainer
-                          }
-                        />
-                        <Text
-                          style={[
-                            styles.roleBadgeHeaderText,
-                            {
-                              color:
-                                userRole === 'OWNER'
-                                  ? colors.onPrimaryContainer
-                                  : userRole === 'MANAGER'
-                                  ? colors.info
-                                  : colors.onSuccessContainer,
-                            },
-                          ]}
-                        >
-                          {userRole}
-                        </Text>
-                      </View>
-                    </View>
                   </View>
                 </View>
 
@@ -1783,7 +1666,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     </View>
                     <View style={styles.stepperControlsRow}>
                       <TouchableOpacity
-                        style={styles.stepperBtn}
+                        style={[
+                          styles.stepperBtn,
+                          targetSeatCount <= Math.max(subscriptionData.activeStaffCount, 1) && styles.submitButtonDisabled,
+                        ]}
                         onPress={() => handleChangeSeatCount(-1)}
                         disabled={targetSeatCount <= Math.max(subscriptionData.activeStaffCount, 1)}
                       >
@@ -1856,7 +1742,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                   <TouchableOpacity
                     style={[
                       styles.confirmPlanBtn,
-                      updatingSubscription && { opacity: 0.6 },
+                      updatingSubscription && styles.submitButtonDisabled,
                     ]}
                     onPress={handleApplySubscriptionUpdate}
                     disabled={updatingSubscription}
@@ -2306,7 +2192,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSubmit, creatingShift && { opacity: 0.6 }]}
+                style={[styles.modalSubmit, creatingShift && styles.submitButtonDisabled]}
                 onPress={handleCreateShift}
                 disabled={creatingShift}
               >
@@ -2344,7 +2230,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSubmit, creatingTeam && { opacity: 0.6 }]}
+                style={[styles.modalSubmit, creatingTeam && styles.submitButtonDisabled]}
                 onPress={handleCreateTeam}
                 disabled={creatingTeam}
               >
@@ -2414,7 +2300,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 <Text style={styles.modalCancelText}>Close</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSubmit, inviting && { opacity: 0.6 }]}
+                style={[styles.modalSubmit, inviting && styles.submitButtonDisabled]}
                 onPress={handleCreateInvite}
                 disabled={inviting}
               >
@@ -2453,7 +2339,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSubmit, joining && { opacity: 0.6 }]}
+                style={[styles.modalSubmit, joining && styles.submitButtonDisabled]}
                 onPress={handleJoinTeam}
                 disabled={joining}
               >
@@ -2593,7 +2479,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalSubmit, submittingSwap && { opacity: 0.6 }]}
+                style={[styles.modalSubmit, submittingSwap && styles.submitButtonDisabled]}
                 onPress={handleSubmitSwapRequest}
                 disabled={submittingSwap}
               >
@@ -2923,26 +2809,35 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     borderRadius: radius.full,
     marginLeft: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  removePillText: {
-    ...typography.labelSmall,
-    color: colors.onErrorContainer,
-    fontWeight: '700',
+  removeIconOnly: {
+    // Owner dashboard: bare delete icon, no red pill background.
+    backgroundColor: 'transparent',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs,
   },
   emptyBox: {
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     ...typography.bodyLarge,
     color: colors.onSurface,
     fontWeight: '600',
+    marginTop: spacing.xs,
+    textAlign: 'center',
   },
   emptySubtext: {
     ...typography.bodySmall,
     color: colors.onSurfaceVariant,
-    marginTop: 4,
+    marginTop: 6,
     textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 300,
   },
   teamPillsContainer: {
     flexDirection: 'row',
@@ -3286,8 +3181,15 @@ const styles = StyleSheet.create({
   },
   memberName: {
     ...typography.bodyLarge,
+    fontSize: 13,
     color: colors.onSurface,
     fontWeight: '600',
+    flexShrink: 1,
+  },
+  memberNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   memberEmail: {
     ...typography.bodySmall,
@@ -3301,7 +3203,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.surfaceContainer,
   },
@@ -3476,6 +3378,9 @@ const styles = StyleSheet.create({
     ...typography.labelMedium,
     color: colors.onPrimary,
     fontWeight: '700',
+  },
+  submitButtonDisabled: {
+    opacity: 0.38,
   },
   swapShiftBtn: {
     backgroundColor: colors.secondaryContainer,
@@ -4155,17 +4060,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: spacing.sm,
   },
-  roleBadgeHeader: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-    alignSelf: 'center',
-  },
-  roleBadgeHeaderText: {
-    ...typography.labelMedium,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
   prefSubgroup: {
     marginTop: spacing.sm,
   },
@@ -4269,10 +4163,6 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.onSurfaceVariant,
     marginTop: 2,
-  },
-  profileBadgeContainer: {
-    marginTop: spacing.xs,
-    alignSelf: 'flex-start',
   },
   profileSubTabRow: {
     flexDirection: 'row',

@@ -3,7 +3,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
-import { pool, query } from '../../db/pool';
+import { PoolClient } from 'pg';
+import { pool, query, poolAdapter } from '../../db/pool';
 import { EmailService } from '../notifications/email.service';
 import { acquireCooldown, rateLimit } from '../../lib/rateLimit';
 
@@ -82,7 +83,7 @@ export interface SessionTokens {
 }
 
 export class AuthService {
-  static async register(input: RegisterInput) {
+  static async register(input: RegisterInput, idempotencyKey?: string) {
     const { email, password, firstName, lastName } = input;
 
     // Validate email format
@@ -111,54 +112,174 @@ export class AuthService {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const normalizedFirstName = firstName.trim();
+    const normalizedLastName = lastName?.trim() || null;
+    const cleanIdempotencyKey = idempotencyKey?.trim() || null;
+    const scope = 'auth:register';
 
-    // Check duplicate email
-    const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-    if (existing.rowCount && existing.rowCount > 0) {
-      const error: any = new Error('An account with this email already exists');
-      error.code = 'EMAIL_ALREADY_EXISTS';
-      error.status = 409;
-      throw error;
+    // 1. Idempotency pre-check: If an idempotency key is provided, check for existing record
+    let requestHash: string | null = null;
+    if (cleanIdempotencyKey) {
+      const payloadToHash = JSON.stringify({
+        email: normalizedEmail,
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+      });
+      requestHash = crypto.createHash('sha256').update(payloadToHash).digest('hex');
+
+      const existingRecordRes = await poolAdapter.query(
+        `SELECT id, status, request_hash, response_code, response_body, expires_at
+         FROM idempotency_keys
+         WHERE scope = $1 AND key = $2`,
+        [scope, cleanIdempotencyKey]
+      );
+
+      if (existingRecordRes.rowCount && existingRecordRes.rowCount > 0) {
+        const existingRecord = existingRecordRes.rows[0];
+
+        // Mismatched payload: reject as 409 conflict
+        if (existingRecord.request_hash !== requestHash) {
+          throw authError(
+            'IDEMPOTENCY_MISMATCH',
+            'Idempotency-Key was already used for a different request payload',
+            409
+          );
+        }
+
+        // Already completed: replay the original cached response immediately
+        if (existingRecord.status === 'COMPLETED' && existingRecord.response_body) {
+          return existingRecord.response_body;
+        }
+
+        // Still in progress and not expired
+        if (existingRecord.status === 'IN_PROGRESS' && new Date(existingRecord.expires_at) > new Date()) {
+          throw authError(
+            'IDEMPOTENCY_IN_PROGRESS',
+            'A registration request with this Idempotency-Key is currently in progress',
+            409
+          );
+        }
+      }
     }
 
-    // bcrypt password hash (adaptive, intentionally slow — cost factor 12).
-    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+    // 2. Execute registration within poolAdapter managed transaction
+    // Guaranteed connection pooling (max 10) with automatic client release in finally
+    const txResult = await poolAdapter.withTransaction(async (client) => {
+      // If idempotency key provided, claim the key
+      if (cleanIdempotencyKey && requestHash) {
+        const keyExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24-hour TTL
+        try {
+          await client.query(
+            `INSERT INTO idempotency_keys (key, scope, request_hash, status, expires_at)
+             VALUES ($1, $2, $3, 'IN_PROGRESS', $4)
+             ON CONFLICT (scope, key) DO UPDATE
+               SET status = 'IN_PROGRESS', request_hash = $3, expires_at = $4
+               WHERE idempotency_keys.status = 'IN_PROGRESS' AND idempotency_keys.expires_at <= NOW()`,
+            [cleanIdempotencyKey, scope, requestHash, keyExpiresAt]
+          );
+        } catch (err: any) {
+          if (err.code === '23505') {
+            // Concurrent request claimed the key. Check its state.
+            const check = await poolAdapter.query(
+              `SELECT status, request_hash, response_body FROM idempotency_keys WHERE scope = $1 AND key = $2`,
+              [scope, cleanIdempotencyKey]
+            );
+            if (check.rowCount && check.rows[0].request_hash !== requestHash) {
+              throw authError(
+                'IDEMPOTENCY_MISMATCH',
+                'Idempotency-Key was already used for a different request payload',
+                409
+              );
+            }
+            if (check.rowCount && check.rows[0].status === 'COMPLETED' && check.rows[0].response_body) {
+              return { isReplay: true, responseData: check.rows[0].response_body, userId: null, userEmail: null };
+            }
+            throw authError(
+              'IDEMPOTENCY_IN_PROGRESS',
+              'A registration request with this Idempotency-Key is currently in progress',
+              409
+            );
+          }
+          throw err;
+        }
+      }
 
-    const insertUserRes = await query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, status)
-       VALUES ($1, $2, $3, $4, 'ACTIVE')
-       RETURNING id, email, first_name, last_name, status, created_at`,
-      [normalizedEmail, passwordHash, firstName.trim(), lastName?.trim() || null]
-    );
+      // Pre-check duplicate email using the transaction client
+      const existingUser = await client.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+      if (existingUser.rowCount && existingUser.rowCount > 0) {
+        throw authError('EMAIL_ALREADY_EXISTS', 'An account with this email already exists', 409);
+      }
 
-    const user = insertUserRes.rows[0];
+      // Hash password with bcrypt cost factor 12
+      const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
 
-    // Create session and tokens (short-lived access + refresh)
-    const sessionTokens = await AuthService.createSession(user.id);
+      // Insert user and catch concurrent race condition on users.email uniquely
+      let user;
+      try {
+        const insertUserRes = await client.query(
+          `INSERT INTO users (email, password_hash, first_name, last_name, status)
+           VALUES ($1, $2, $3, $4, 'ACTIVE')
+           RETURNING id, email, first_name, last_name, status, created_at`,
+          [normalizedEmail, passwordHash, normalizedFirstName, normalizedLastName]
+        );
+        user = insertUserRes.rows[0];
+      } catch (dbErr: any) {
+        // Race condition handling:
+        // If two concurrent requests pass the SELECT pre-check at the exact same millisecond,
+        // PostgreSQL's unique index raises error code '23505' (unique_violation).
+        // Catch it and translate uniquely to EMAIL_ALREADY_EXISTS with HTTP 409.
+        if (dbErr.code === '23505') {
+          throw authError('EMAIL_ALREADY_EXISTS', 'An account with this email already exists', 409);
+        }
+        throw dbErr;
+      }
 
-    // Issue + enqueue the verification email. Delivery is asynchronous and must
-    // never fail signup — the user can request a resend if it does not arrive.
-    try {
-      await AuthService.dispatchVerificationEmail(user.id, user.email);
-    } catch (err: any) {
-      console.error('Failed to dispatch verification email:', err.message);
+      // Create session and tokens within the same transaction client
+      const sessionTokens = await AuthService.createSessionWithClient(client, user.id);
+
+      const responseData = {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          status: user.status,
+          emailVerified: false,
+          createdAt: user.created_at instanceof Date ? user.created_at.toISOString() : user.created_at,
+        },
+        token: sessionTokens.token,
+        accessToken: sessionTokens.accessToken,
+        refreshToken: sessionTokens.refreshToken,
+        expiresIn: sessionTokens.expiresIn,
+      };
+
+      // Mark idempotency key as COMPLETED with the cached response
+      if (cleanIdempotencyKey) {
+        await client.query(
+          `UPDATE idempotency_keys
+           SET status = 'COMPLETED', response_code = 201, response_body = $1
+           WHERE scope = $2 AND key = $3`,
+          [JSON.stringify(responseData), scope, cleanIdempotencyKey]
+        );
+      }
+
+      return { isReplay: false, responseData, userId: user.id, userEmail: user.email };
+    });
+
+    if (txResult.isReplay) {
+      return txResult.responseData;
     }
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        status: user.status,
-        emailVerified: false,
-        createdAt: user.created_at,
-      },
-      token: sessionTokens.token,
-      accessToken: sessionTokens.accessToken,
-      refreshToken: sessionTokens.refreshToken,
-      expiresIn: sessionTokens.expiresIn,
-    };
+    // 3. Dispatch verification email outside of transaction (asynchronous, non-blocking)
+    if (txResult.userId && txResult.userEmail) {
+      try {
+        await AuthService.dispatchVerificationEmail(txResult.userId, txResult.userEmail);
+      } catch (err: any) {
+        console.error('Failed to dispatch verification email:', err.message);
+      }
+    }
+
+    return txResult.responseData;
   }
 
   static async login(input: LoginInput) {
@@ -808,12 +929,12 @@ export class AuthService {
     };
   }
 
-  private static async createSession(userId: string): Promise<SessionTokens> {
+  private static async createSessionWithClient(client: PoolClient, userId: string): Promise<SessionTokens> {
     const sessionExpiresAt = new Date();
     sessionExpiresAt.setDate(sessionExpiresAt.getDate() + SESSION_EXPIRY_DAYS);
 
     // 1. Create session in database
-    const sessionRes = await query(
+    const sessionRes = await client.query(
       `INSERT INTO sessions (user_id, token_hash, expires_at)
        VALUES ($1, 'pending', $2)
        RETURNING id`,
@@ -833,7 +954,7 @@ export class AuthService {
     );
     const accessHash = crypto.createHash('sha256').update(accessToken).digest('hex');
 
-    await query(
+    await client.query(
       `UPDATE sessions SET token_hash = $1 WHERE id = $2`,
       [accessHash, sessionId]
     );
@@ -844,7 +965,7 @@ export class AuthService {
     const familyId = crypto.randomUUID();
     const refreshExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    await query(
+    await client.query(
       `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
        VALUES ($1, $2, $3, $4)`,
       [userId, refreshHash, familyId, refreshExpiresAt]
@@ -856,5 +977,9 @@ export class AuthService {
       token: accessToken,
       expiresIn: 900,
     };
+  }
+
+  private static async createSession(userId: string): Promise<SessionTokens> {
+    return poolAdapter.withTransaction((client) => AuthService.createSessionWithClient(client, userId));
   }
 }

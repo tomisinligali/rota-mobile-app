@@ -79,6 +79,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
       if (login) {
         emailRef.current?.focus();
       } else {
+        // Register UI: never auto-focus the email. The email input is shared
+        // across both tabs, so blur it explicitly to drop any login-mode focus
+        // that would otherwise carry over into the Register tab.
+        emailRef.current?.blur();
         firstNameRef.current?.focus();
       }
     }, 300);
@@ -872,7 +876,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   submitButtonDisabled: {
-    opacity: 0.6,
+    opacity: 0.38,
   },
   submitButtonText: {
     ...typography.labelLarge,
@@ -917,8 +921,11 @@ const styles = StyleSheet.create({
   },
   forgotPasswordButton: {
     alignSelf: 'flex-end',
-    marginTop: -spacing.xs,
-    marginBottom: spacing.sm,
+    // Net 4px (spacing.xs) between the password field and this link:
+    // the input group contributes marginBottom 16px, so pull up by 12px.
+    marginTop: -(spacing.md - spacing.xs),
+    // 100% more than before: 8px -> 16px between the link and the submit button.
+    marginBottom: spacing.md,
     paddingVertical: spacing.xs,
   },
   forgotPasswordText: {

@@ -1,10 +1,11 @@
 import { StorageService } from './storage';
+import { Platform } from 'react-native';
 
 // Base API configuration from environment
 const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   process.env.API_URL ||
-  'http://192.168.100.33:5001/api/v1';
+  (Platform.OS === 'web' ? 'http://localhost:5001/api/v1' : 'http://172.20.10.2:5001/api/v1');
 
 // Server origin for non-versioned endpoints like /health
 const SERVER_ORIGIN = BASE_URL.replace('/api/v1', '');
@@ -112,11 +113,26 @@ export const ApiService = {
     return await response.json();
   },
 
-  async register(data: { email: string; password: string; firstName: string; lastName?: string }) {
-    const res = await request<{ user: any; token: string; accessToken?: string; refreshToken?: string }>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  async register(
+    data: { email: string; password: string; firstName: string; lastName?: string },
+    idempotencyKey?: string
+  ) {
+    const key =
+      idempotencyKey ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `reg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
+
+    const res = await request<{ user: any; token: string; accessToken?: string; refreshToken?: string }>(
+      '/auth/register',
+      {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': key,
+        },
+        body: JSON.stringify(data),
+      }
+    );
     const accessToken = res?.accessToken || res?.token;
     if (accessToken) {
       await StorageService.setTokens({

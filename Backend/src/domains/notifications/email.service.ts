@@ -153,4 +153,34 @@ export class EmailService {
       html,
     });
   }
+
+  /**
+   * Sends billing renewal failure and grace period notification to the business owner.
+   */
+  static async sendBillingFailureNotification(
+    to: string,
+    businessName: string,
+    daysRemaining: number
+  ): Promise<void> {
+    const text =
+      `Hello,\n\n` +
+      `We were unable to process your subscription renewal for ${businessName}.\n\n` +
+      `Your account has entered a ${daysRemaining}-day grace period. Please update your payment method to avoid service interruption and restricted access.\n\n` +
+      `Your schedules and historical workforce records remain preserved.\n`;
+
+    const html = `
+      <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1a1a1a;">
+        <h2 style="margin:0 0 8px;color:#BA1A1A;">Subscription Renewal Notice</h2>
+        <p style="margin:0 0 16px;color:#555;">We were unable to process your renewal payment for <strong>${businessName}</strong>.</p>
+        <p style="margin:0 0 16px;color:#555;">Your account is now in a <strong>${daysRemaining}-day grace period</strong>. Please update your payment method to ensure continued access to shift scheduling.</p>
+        <p style="margin:0;color:#888;font-size:12px;">All team schedules and history remain safe and intact.</p>
+      </div>`;
+
+    await EmailService.enqueue({
+      to,
+      subject: `Payment failed for ${businessName} - Action required`,
+      text,
+      html,
+    });
+  }
 }

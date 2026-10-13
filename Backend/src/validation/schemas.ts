@@ -30,6 +30,11 @@ export const forgotPasswordSchema = z.object({
   email: z.string().trim().email('Invalid email address'),
 });
 
+export const verifyResetCodeSchema = z.object({
+  email: z.string().trim().email('Invalid email address'),
+  code: z.string().trim().length(6, 'Verification code must be exactly 6 digits'),
+});
+
 export const resetPasswordSchema = z.object({
   email: z.string().trim().email('Invalid email address'),
   code: z.string().trim().length(6, 'Verification code must be exactly 6 digits'),

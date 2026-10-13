@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../theme/tokens';
@@ -78,6 +80,7 @@ export const UpgradePlanModal: React.FC<UpgradePlanModalProps> = ({
   };
 
   const activePlan = plans[selectedTier];
+  const isCurrentPlan = currentPlanTier?.toUpperCase() === selectedTier.toUpperCase();
 
   const handleProceedToCheckout = async () => {
     if (!businessId) {
@@ -129,7 +132,17 @@ export const UpgradePlanModal: React.FC<UpgradePlanModalProps> = ({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+        <TouchableWithoutFeedback
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss modal"
+        >
+          <View style={styles.modalBackdrop} />
+        </TouchableWithoutFeedback>
+        <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={{ flex: 1 }}>
@@ -300,12 +313,22 @@ export const UpgradePlanModal: React.FC<UpgradePlanModalProps> = ({
           {/* Action CTA */}
           <View style={styles.footerContainer}>
             <TouchableOpacity
-              style={[styles.checkoutBtn, loading && styles.checkoutBtnDisabled]}
+              style={[
+                styles.checkoutBtn,
+                (loading || isCurrentPlan) && styles.checkoutBtnDisabled,
+              ]}
               onPress={handleProceedToCheckout}
-              disabled={loading}
+              disabled={loading || isCurrentPlan}
             >
               {loading ? (
                 <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : isCurrentPlan ? (
+                <View style={styles.btnContentRow}>
+                  <Ionicons name="checkmark-circle" size={18} color={colors.onPrimary} />
+                  <Text style={styles.checkoutBtnText}>
+                    Active Plan: {activePlan.name}
+                  </Text>
+                </View>
               ) : (
                 <View style={styles.btnContentRow}>
                   <Text style={styles.checkoutBtnText}>
@@ -327,6 +350,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   modalContent: {
     backgroundColor: colors.surface,

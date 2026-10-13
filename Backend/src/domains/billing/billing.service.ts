@@ -520,15 +520,24 @@ export class BillingService {
           const isSuccess = txStatus === 'successful';
 
           if (isSuccess) {
+            const meta = payload.data?.meta || {};
+            const webhookPlanTier = (meta.plan_tier as PlanTier) || (payload.data?.tx_ref?.includes('business') ? 'BUSINESS' : 'TEAM');
+            const webhookSeatCount = Number(meta.seat_count) || (webhookPlanTier === 'BUSINESS' ? 40 : 15);
+            const planConfig = PLAN_CONFIG[webhookPlanTier] || PLAN_CONFIG.TEAM;
+            const unitPriceCents = planConfig.basePriceCents;
+
             await client.query(
               `UPDATE subscriptions
                SET status = 'ACTIVE',
+                   plan_tier = $2,
+                   seat_count = $3,
+                   unit_price_cents = $4,
                    current_period_start = NOW(),
                    current_period_end = NOW() + INTERVAL '30 days',
                    grace_period_ends_at = NULL,
                    updated_at = NOW()
                WHERE id = $1`,
-              [subId]
+              [subId, webhookPlanTier, webhookSeatCount, unitPriceCents]
             );
 
             await client.query(
@@ -614,6 +623,177 @@ export class BillingService {
           throw err;
         }
       }
+    }
+  }
+
+  /**
+   * Verifies a completed Flutterwave transaction with Flutterwave's API
+   * and updates the business subscription and ledger atomically in PostgreSQL.
+   */
+  static async verifyAndProcessTransaction(transactionId: string, expectedTxRef?: string): Promise<{
+    success: boolean;
+    message: string;
+    businessId?: string;
+    planTier?: PlanTier;
+    seatCount?: number;
+    billingCycle?: string;
+    amount?: number;
+    currency?: string;
+    txRef?: string;
+  }> {
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    if (!secretKey) {
+      throw new Error('FLUTTERWAVE_SECRET_KEY is not configured');
+    }
+
+    // Call Flutterwave's official transaction verification API
+    const response = await fetch(
+      `https://api.flutterwave.com/v3/transactions/${encodeURIComponent(transactionId)}/verify`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const verifyResult: any = await response.json();
+    if (verifyResult.status !== 'success' || verifyResult.data?.status !== 'successful') {
+      return {
+        success: false,
+        message: verifyResult.message || 'Payment verification failed with Flutterwave',
+      };
+    }
+
+    const txData = verifyResult.data;
+    const meta = txData.meta || {};
+    let businessId: string = meta.business_id;
+    let planTier: PlanTier = (meta.plan_tier as PlanTier) || 'TEAM';
+    let seatCount: number = Number(meta.seat_count) || (planTier === 'BUSINESS' ? 40 : 15);
+    const billingCycle: string = meta.billing_cycle || (txData.amount >= 500 ? 'yearly' : 'monthly');
+    const amountCents = Math.round(Number(txData.amount || 0) * 100);
+    const currency = txData.currency || 'USD';
+    const providerPaymentId = String(txData.id);
+    const providerEventId = `flutterwave_tx_${txData.id}`;
+
+    // If businessId is missing in meta, look it up by tx_ref or customer email
+    if (!businessId && txData.tx_ref) {
+      const parts = txData.tx_ref.split('_');
+      if (parts[1]?.toUpperCase() === 'TEAM' || parts[1]?.toUpperCase() === 'BUSINESS') {
+        planTier = parts[1].toUpperCase() as PlanTier;
+      }
+    }
+
+    if (!businessId && txData.customer?.email) {
+      const uRes = await query(
+        `SELECT t.business_id
+         FROM users u
+         JOIN team_memberships tm ON tm.user_id = u.id AND tm.role = 'OWNER'
+         JOIN teams t ON t.id = tm.team_id
+         WHERE LOWER(u.email) = LOWER($1)
+         LIMIT 1`,
+        [txData.customer.email.trim()]
+      );
+      if (uRes.rowCount && uRes.rowCount > 0) {
+        businessId = uRes.rows[0].business_id;
+      }
+    }
+
+    if (!businessId) {
+      return {
+        success: false,
+        message: 'Could not associate transaction with a Rota business account',
+      };
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Check for deduplication: don't double charge if already recorded
+      const existingLedger = await client.query(
+        `SELECT id FROM billing_ledger WHERE provider_payment_id = $1 OR provider_event_id = $2`,
+        [providerPaymentId, providerEventId]
+      );
+
+      const periodDays = billingCycle === 'yearly' ? 365 : 30;
+      const planConfig = PLAN_CONFIG[planTier] || PLAN_CONFIG.TEAM;
+      const unitPriceCents = planConfig.basePriceCents;
+
+      // Lock subscription row
+      const subRes = await client.query(
+        `SELECT id FROM subscriptions WHERE business_id = $1 FOR UPDATE`,
+        [businessId]
+      );
+
+      let subId: string;
+      if (subRes.rowCount === 0) {
+        const createSub = await client.query(
+          `INSERT INTO subscriptions (business_id, plan_tier, seat_count, status, unit_price_cents, currency, current_period_start, current_period_end)
+           VALUES ($1, $2, $3, 'ACTIVE', $4, $5, NOW(), NOW() + ($6 || ' days')::INTERVAL)
+           RETURNING id`,
+          [businessId, planTier, seatCount, unitPriceCents, currency, periodDays]
+        );
+        subId = createSub.rows[0].id;
+      } else {
+        subId = subRes.rows[0].id;
+        await client.query(
+          `UPDATE subscriptions
+           SET status = 'ACTIVE',
+               plan_tier = $1,
+               seat_count = $2,
+               unit_price_cents = $3,
+               currency = $4,
+               current_period_start = NOW(),
+               current_period_end = NOW() + ($5 || ' days')::INTERVAL,
+               grace_period_ends_at = NULL,
+               scheduled_plan_tier = NULL,
+               scheduled_seat_count = NULL,
+               scheduled_effective_at = NULL,
+               updated_at = NOW()
+           WHERE id = $6`,
+          [planTier, seatCount, unitPriceCents, currency, periodDays, subId]
+        );
+      }
+
+      // If not already recorded in ledger, record immutable charge entry
+      if (existingLedger.rowCount === 0) {
+        await client.query(
+          `INSERT INTO billing_ledger
+            (business_id, subscription_id, entry_type, amount_cents, currency, description, provider_payment_id, provider_event_id, metadata)
+           VALUES ($1, $2, 'CHARGE', $3, $4, $5, $6, $7, $8)`,
+          [
+            businessId,
+            subId,
+            amountCents,
+            currency,
+            `Verified Flutterwave payment: ${planTier} plan (${billingCycle})`,
+            providerPaymentId,
+            providerEventId,
+            JSON.stringify(txData),
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        message: 'Payment verified and plan activated successfully',
+        businessId,
+        planTier,
+        seatCount,
+        billingCycle,
+        amount: txData.amount,
+        currency,
+        txRef: txData.tx_ref,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
   }
 

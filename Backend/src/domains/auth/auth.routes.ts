@@ -9,6 +9,7 @@ import {
   googleLoginSchema,
   refreshSchema,
   forgotPasswordSchema,
+  verifyResetCodeSchema,
   resetPasswordSchema,
   verifyEmailSchema,
   logoutSchema,
@@ -39,6 +40,13 @@ router.post(
   redisRateLimiter({ prefix: 'forgot_password', limit: 5, windowSeconds: 900 }),
   validateBody(forgotPasswordSchema),
   AuthController.forgotPassword
+);
+
+router.post(
+  '/verify-reset-code',
+  redisRateLimiter({ prefix: 'verify_reset_code', limit: 10, windowSeconds: 900 }),
+  validateBody(verifyResetCodeSchema),
+  AuthController.verifyResetCode
 );
 
 router.post(

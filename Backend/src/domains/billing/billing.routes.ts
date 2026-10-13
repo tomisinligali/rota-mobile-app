@@ -40,4 +40,7 @@ router.post(
   BillingController.handleWebhook
 );
 
+// Redirect callback after Flutterwave checkout completes in browser
+router.get('/redirect-callback', BillingController.handleRedirectCallback);
+
 export default router;

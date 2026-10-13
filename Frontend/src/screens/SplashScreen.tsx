@@ -17,7 +17,7 @@ interface SplashScreenProps {
 // the walkthrough was already seen or a saved session exists. It is guarded by
 // __DEV__, so it can never affect a production build. Flip to `false` to restore
 // the normal "show the intro once per device" behavior.
-const PREVIEW_INTRO_ON_LAUNCH = __DEV__;
+const PREVIEW_INTRO_ON_LAUNCH = false;
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onNavigate }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

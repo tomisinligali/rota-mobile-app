@@ -727,14 +727,35 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
 
   const renderFeedHeader = useCallback(() => (
     <View style={styles.feedHeaderContainer}>
-      {/* Top Bar - other tabs show title only */}
-      <View style={[styles.topBar, { justifyContent: 'flex-start' }]}>
-        <Text style={[styles.cardTitle, { fontSize: 20, marginLeft: 0 }]}>{
-          activeTab === 'shifts' ? 'Shifts' :
-          activeTab === 'swaps' ? 'Swaps' :
-          activeTab === 'roster' ? 'Roster' :
-          activeTab === 'profile' ? 'Profile' : 'Rota'
-        }</Text>
+      {/* Feed Top Bar: BrandLogo, Greeting, and Notification Bell */}
+      <View style={styles.topBar}>
+        <View>
+          <BrandLogo iconSize={24} textSize={16} />
+          <Text style={styles.greeting}>Hello, {profile.firstName || 'User'}</Text>
+        </View>
+        <View style={styles.topBarRight}>
+          <TouchableOpacity
+            style={styles.notifBellBtn}
+            onPress={() => setShowNotificationsModal(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+          >
+            <Ionicons
+              name={
+                unreadNotifCount > 0 || showNotificationsModal
+                  ? 'notifications'
+                  : 'notifications-outline'
+              }
+              size={22}
+              color={colors.onSurface}
+            />
+            {unreadNotifCount > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{unreadNotifCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Active Team Header */}
@@ -882,9 +903,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
           contentContainerStyle={styles.contentContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-      {/* Top Bar - other tabs show title only */}
-      <View style={[styles.topBar, { justifyContent: 'flex-start' }]}>
-        <Text style={[styles.cardTitle, { fontSize: 20, marginLeft: 0 }]}>{
+      {/* Screen Title Top Bar for other tabs */}
+      <View style={[styles.topBar, { justifyContent: 'flex-start', marginBottom: spacing.md }]}>
+        <Text style={[styles.greeting, { fontSize: 26, fontWeight: '700' }]}>{
           activeTab === 'shifts' ? 'Shifts' :
           activeTab === 'swaps' ? 'Swaps' :
           activeTab === 'roster' ? 'Roster' :

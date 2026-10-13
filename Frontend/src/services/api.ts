@@ -198,6 +198,16 @@ export const ApiService = {
     });
   },
 
+  async verifyResetCode(
+    email: string,
+    code: string
+  ): Promise<{ valid: boolean }> {
+    return await request<{ valid: boolean }>('/auth/verify-reset-code', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    });
+  },
+
   async resetPassword(
     email: string,
     code: string,

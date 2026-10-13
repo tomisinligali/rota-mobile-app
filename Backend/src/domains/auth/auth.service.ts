@@ -832,6 +832,59 @@ export class AuthService {
   }
 
   /**
+   * Verifies the 6-digit password reset code without consuming it.
+   */
+  static async verifyResetCode(email: string, code: string) {
+    if (!email || !code) {
+      throw authError('VALIDATION_ERROR', 'Email and reset code are required', 400);
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Rate limit verification attempts: 10 per 15 minutes per email
+    const attemptRl = await rateLimit(`reset-password:attempts:${normalizedEmail}`, 10, 900);
+    if (!attemptRl.allowed) {
+      throw authError('RATE_LIMIT_EXCEEDED', 'Too many attempts. Please try again later.', 429, {
+        retryAfterSeconds: attemptRl.retryAfterSeconds,
+      });
+    }
+
+    const userRes = await query(
+      `SELECT id, email, status FROM users WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    if (userRes.rowCount === 0 || userRes.rows[0].status !== 'ACTIVE') {
+      throw authError('INVALID_RESET_CODE', 'Invalid or expired password reset code', 400);
+    }
+
+    const user = userRes.rows[0];
+    const codeHash = hashToken(code.trim());
+
+    const tokenRes = await query(
+      `SELECT id, user_id, expires_at, consumed_at
+       FROM password_reset_tokens
+       WHERE user_id = $1 AND token_hash = $2`,
+      [user.id, codeHash]
+    );
+
+    if (tokenRes.rowCount === 0) {
+      throw authError('INVALID_RESET_CODE', 'Invalid or expired password reset code', 400);
+    }
+
+    const record = tokenRes.rows[0];
+    if (record.consumed_at !== null) {
+      throw authError('RESET_CODE_ALREADY_USED', 'This password reset code has already been used', 400);
+    }
+
+    if (new Date(record.expires_at) < new Date()) {
+      throw authError('RESET_CODE_EXPIRED', 'Password reset code has expired. Please request a new one.', 400);
+    }
+
+    return { valid: true };
+  }
+
+  /**
    * Resets the user's password using the single-use expiring token.
    * On success, updates the password and revokes all active sessions/refresh tokens.
    */

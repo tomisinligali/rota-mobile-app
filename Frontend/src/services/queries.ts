@@ -91,6 +91,8 @@ export function useSubscriptionQuery(businessId?: string, enabled = true) {
     queryKey: queryKeys.subscription(businessId ?? ''),
     queryFn: () => ApiService.getSubscription(businessId as string),
     enabled: !!businessId && enabled,
+    staleTime: 0,
+    refetchOnMount: true,
   });
 }
 

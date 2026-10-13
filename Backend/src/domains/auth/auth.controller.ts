@@ -145,6 +145,26 @@ export class AuthController {
     }
   }
 
+  static async verifyResetCode(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, code } = req.body;
+      const result = await AuthService.verifyResetCode(email, code);
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      const status = err.status || 500;
+      res.status(status).json({
+        error: {
+          code: err.code || 'INTERNAL_SERVER_ERROR',
+          message: err.message || 'An unexpected error occurred while verifying reset code',
+          details: err.details || {},
+        },
+      });
+    }
+  }
+
   static async resetPassword(req: Request, res: Response): Promise<void> {
     try {
       const { email, code, newPassword } = req.body;

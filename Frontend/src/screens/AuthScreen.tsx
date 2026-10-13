@@ -12,6 +12,7 @@ import {
   Platform,
   ScrollView,
   Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radius } from '../theme/tokens';
@@ -52,14 +53,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
 
   // Forgot / Reset Password state
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [showNewPasswordModal, setShowNewPasswordModal] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotCode, setForgotCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
+  const [newPasswordLoading, setNewPasswordLoading] = useState(false);
+  const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
 
   const firstNameRef = useRef<TextInput>(null);
@@ -256,7 +261,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
     setForgotError(null);
     try {
       const res = await ApiService.forgotPassword(forgotEmail.trim());
-      setForgotStep('reset');
+      setForgotStep('verify');
       setForgotSuccess(res.message || 'Check your email for the 6-digit reset code.');
     } catch (err: any) {
       setForgotError(err?.message || 'Failed to send reset code.');
@@ -265,28 +270,46 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
     }
   };
 
-  const handleConfirmReset = async () => {
+  const handleVerifyResetCode = async () => {
     if (!forgotCode || forgotCode.trim().length !== 6) {
       setForgotError('Please enter the 6-digit reset code from your email.');
       return;
     }
+    setForgotLoading(true);
+    setForgotError(null);
+    try {
+      await ApiService.verifyResetCode(forgotEmail.trim(), forgotCode.trim());
+      // Code verified! Close verification modal and open the new password creation modal
+      setShowForgotModal(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setNewPasswordError(null);
+      setShowNewPasswordModal(true);
+    } catch (err: any) {
+      setForgotError(err?.message || 'Invalid or expired verification code.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleSaveNewPassword = async () => {
     if (newPassword.length < 8) {
-      setForgotError('New password must be at least 8 characters long.');
+      setNewPasswordError('New password must be at least 8 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setForgotError('Passwords do not match.');
+      setNewPasswordError('Passwords do not match.');
       return;
     }
-    setForgotLoading(true);
-    setForgotError(null);
+    setNewPasswordLoading(true);
+    setNewPasswordError(null);
     try {
       const res = await ApiService.resetPassword(
         forgotEmail.trim(),
         forgotCode.trim(),
         newPassword
       );
-      setShowForgotModal(false);
+      setShowNewPasswordModal(false);
       setIsLogin(true);
       setEmail(forgotEmail.trim());
       setPassword('');
@@ -297,9 +320,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      setForgotError(err?.message || 'Failed to reset password.');
+      setNewPasswordError(err?.message || 'Failed to reset password.');
     } finally {
-      setForgotLoading(false);
+      setNewPasswordLoading(false);
     }
   };
 
@@ -368,7 +391,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
         ) : null}
 
         {/* Success Banner */}
-        {forgotSuccess && !showForgotModal ? (
+        {forgotSuccess && !showForgotModal && !showNewPasswordModal ? (
           <View style={styles.successBanner}>
             <Ionicons name="checkmark-circle-outline" size={18} color="#2E7D32" />
             <Text style={styles.successText}>{forgotSuccess}</Text>
@@ -584,7 +607,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
         </View>
       </ScrollView>
 
-      {/* Forgot / Reset Password Modal */}
+      {/* MODAL 1: Request & Verify Code Modal */}
       <Modal
         visible={showForgotModal}
         animationType="slide"
@@ -595,7 +618,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
         >
-          <View style={styles.modalContent}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowForgotModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleContainer}>
                 <Text style={styles.modalTitle}>
@@ -604,7 +637,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
                 <Text style={styles.modalSubtitle}>
                   {forgotStep === 'request'
                     ? 'Enter your account email to receive a single-use 6-digit verification code.'
-                    : `Enter the 6-digit code sent to ${forgotEmail} and your new password.`}
+                    : `Enter the 6-digit verification code sent to ${forgotEmail}.`}
                 </Text>
               </View>
               <TouchableOpacity
@@ -673,55 +706,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
                   />
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>New password * (min 8 characters)</Text>
-                  <View style={styles.passwordField}>
-                    <TextInput
-                      style={[styles.input, styles.passwordInput]}
-                      placeholder="••••••••"
-                      placeholderTextColor={colors.onSurfaceVariant}
-                      value={newPassword}
-                      onChangeText={setNewPassword}
-                      secureTextEntry={!showNewPassword}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <TouchableOpacity
-                      style={styles.passwordToggle}
-                      onPress={() => setShowNewPassword((p) => !p)}
-                    >
-                      <Ionicons
-                        name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
-                        size={20}
-                        color={colors.onSurfaceVariant}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Confirm new password *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="••••••••"
-                    placeholderTextColor={colors.onSurfaceVariant}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry={!showNewPassword}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-
                 <TouchableOpacity
                   style={[styles.submitButton, forgotLoading && styles.submitButtonDisabled]}
-                  onPress={handleConfirmReset}
+                  onPress={handleVerifyResetCode}
                   disabled={forgotLoading}
                 >
                   {forgotLoading ? (
                     <ActivityIndicator color={colors.onPrimary} />
                   ) : (
-                    <Text style={styles.submitButtonText}>Reset password</Text>
+                    <Text style={styles.submitButtonText}>Verify code</Text>
                   )}
                 </TouchableOpacity>
 
@@ -733,6 +726,133 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, pendingInvite
                 </TouchableOpacity>
               </View>
             )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODAL 2: Create New Password Modal */}
+      <Modal
+        visible={showNewPasswordModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowNewPasswordModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowNewPasswordModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleContainer}>
+                <Text style={styles.modalTitle}>Create new password</Text>
+                <Text style={styles.modalSubtitle}>
+                  Set a new, secure password (at least 8 characters) for your account.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowNewPasswordModal(false)}
+                style={styles.modalCloseBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close-outline" size={24} color={colors.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
+
+            {newPasswordError ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{newPasswordError}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.modalForm}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>New password * (min 8 characters)</Text>
+                <View style={styles.passwordField}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="••••••••"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    value={newPassword}
+                    onChangeText={(val) => {
+                      setNewPassword(val);
+                      if (newPasswordError) setNewPasswordError(null);
+                    }}
+                    secureTextEntry={!showNewPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={styles.passwordToggle}
+                    onPress={() => setShowNewPassword((p) => !p)}
+                  >
+                    <Ionicons
+                      name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                      size={20}
+                      color={colors.onSurfaceVariant}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Confirm new password *</Text>
+                <View style={styles.passwordField}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="••••••••"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    value={confirmPassword}
+                    onChangeText={(val) => {
+                      setConfirmPassword(val);
+                      if (newPasswordError) setNewPasswordError(null);
+                    }}
+                    secureTextEntry={!showConfirmPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={styles.passwordToggle}
+                    onPress={() => setShowConfirmPassword((p) => !p)}
+                  >
+                    <Ionicons
+                      name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                      size={20}
+                      color={colors.onSurfaceVariant}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.submitButton, newPasswordLoading && styles.submitButtonDisabled]}
+                onPress={handleSaveNewPassword}
+                disabled={newPasswordLoading}
+              >
+                {newPasswordLoading ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text style={styles.submitButtonText}>Save new password</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSecondaryBtn}
+                onPress={() => setShowNewPasswordModal(false)}
+              >
+                <Text style={styles.modalSecondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -982,6 +1102,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   modalContent: {
     backgroundColor: colors.surface,

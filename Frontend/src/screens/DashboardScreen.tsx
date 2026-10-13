@@ -11,6 +11,9 @@ import {
   Modal,
   Alert,
   Platform,
+  AppState,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
@@ -233,6 +236,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     }
   }, [subscriptionQuery.data]);
 
+  const currentPlanLabel = useMemo(() => {
+    const rawName = subscriptionData?.planDetails?.name || subscriptionData?.planTier || 'STARTER';
+    const cleanName = rawName.replace(/plan$/i, '').trim();
+    return `${cleanName.charAt(0).toUpperCase() + cleanName.slice(1).toLowerCase()} Plan`;
+  }, [subscriptionData?.planDetails?.name, subscriptionData?.planTier]);
+
   // Default to the first available team once teams load.
   useEffect(() => {
     if (teams.length > 0 && !selectedTeamId) {
@@ -270,6 +279,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     setErrorMsg(null);
     await queryClient.invalidateQueries();
   }, [queryClient]);
+
+  // Auto-refresh when returning from background (e.g. returning from Safari checkout)
+  useEffect(() => {
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        loadData();
+      }
+    });
+    return () => {
+      appStateSub.remove();
+    };
+  }, [loadData]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -706,33 +727,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
 
   const renderFeedHeader = useCallback(() => (
     <View style={styles.feedHeaderContainer}>
-      {/* Top Bar */}
-      <View style={styles.topBar}>
-        <View>
-          <BrandLogo iconSize={24} textSize={16} />
-          <Text style={styles.greeting}>Hello, {profile.firstName || 'User'}</Text>
-        </View>
-        <View style={styles.topBarRight}>
-          <TouchableOpacity
-            style={styles.notifBellBtn}
-            onPress={() => setShowNotificationsModal(true)}
-          >
-            <Ionicons
-              name={
-                unreadNotifCount > 0 || showNotificationsModal
-                  ? 'notifications'
-                  : 'notifications-outline'
-              }
-              size={22}
-              color={colors.onSurface}
-            />
-            {unreadNotifCount > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{unreadNotifCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
+      {/* Top Bar - other tabs show title only */}
+      <View style={[styles.topBar, { justifyContent: 'flex-start' }]}>
+        <Text style={[styles.cardTitle, { fontSize: 20, marginLeft: 0 }]}>{
+          activeTab === 'shifts' ? 'Shifts' :
+          activeTab === 'swaps' ? 'Swaps' :
+          activeTab === 'roster' ? 'Roster' :
+          activeTab === 'profile' ? 'Profile' : 'Rota'
+        }</Text>
       </View>
 
       {/* Active Team Header */}
@@ -747,13 +749,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               </Text>
             </View>
             {userRole === 'OWNER' && (
-              <TouchableOpacity
-                style={styles.headerUpgradeBtn}
-                onPress={() => setShowUpgradeModal(true)}
-              >
-                <Ionicons name="sparkles" size={13} color="#FFFFFF" />
-                <Text style={styles.headerUpgradeBtnText}>Upgrade Plan</Text>
-              </TouchableOpacity>
+              <View style={styles.teamPlanTag}>
+                <Text style={styles.teamPlanTagText}>{currentPlanLabel}</Text>
+              </View>
             )}
           </View>
         </View>
@@ -767,10 +765,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
             <Text style={styles.cardSubtitle}>
               Real-time audit log of shifts, updates, and workforce events.
             </Text>
-          </View>
-          <View style={styles.cursorBadge}>
-            <Ionicons name="infinite" size={13} color={colors.primary} />
-            <Text style={styles.cursorBadgeText}>Cursor Feed</Text>
           </View>
         </View>
       </View>
@@ -888,33 +882,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
           contentContainerStyle={styles.contentContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-      {/* Top Bar */}
-      <View style={styles.topBar}>
-        <View>
-          <BrandLogo iconSize={24} textSize={16} />
-          <Text style={styles.greeting}>Hello, {profile.firstName || 'User'}</Text>
-        </View>
-        <View style={styles.topBarRight}>
-          <TouchableOpacity
-            style={styles.notifBellBtn}
-            onPress={() => setShowNotificationsModal(true)}
-          >
-            <Ionicons
-              name={
-                unreadNotifCount > 0 || showNotificationsModal
-                  ? 'notifications'
-                  : 'notifications-outline'
-              }
-              size={22}
-              color={colors.onSurface}
-            />
-            {unreadNotifCount > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{unreadNotifCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
+      {/* Top Bar - other tabs show title only */}
+      <View style={[styles.topBar, { justifyContent: 'flex-start' }]}>
+        <Text style={[styles.cardTitle, { fontSize: 20, marginLeft: 0 }]}>{
+          activeTab === 'shifts' ? 'Shifts' :
+          activeTab === 'swaps' ? 'Swaps' :
+          activeTab === 'roster' ? 'Roster' :
+          activeTab === 'profile' ? 'Profile' : 'Rota'
+        }</Text>
       </View>
 
       {errorMsg ? (
@@ -944,13 +919,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 </Text>
               </View>
               {userRole === 'OWNER' && (
-                <TouchableOpacity
-                  style={styles.headerUpgradeBtn}
-                  onPress={() => setShowUpgradeModal(true)}
-                >
-                  <Ionicons name="sparkles" size={13} color="#FFFFFF" />
-                  <Text style={styles.headerUpgradeBtnText}>Upgrade Plan</Text>
-                </TouchableOpacity>
+                <View style={styles.teamPlanTag}>
+                  <Text style={styles.teamPlanTagText}>{currentPlanLabel}</Text>
+                </View>
               )}
             </View>
 
@@ -1830,6 +1801,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 </View>
               </View>
 
+              {/* Subscription & Upgrade Plan Section (OWNER ONLY) */}
+              {userRole === 'OWNER' && (
+                <View style={styles.settingsPlanCard}>
+                  <View style={styles.settingsPlanRow}>
+                    <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                      <Text style={styles.settingsPlanTitle}>Current Plan</Text>
+                      <Text style={styles.settingsPlanSubtitle}>
+                        Manage your team subscription tier, seat capacity and billing cycle.
+                      </Text>
+                    </View>
+                    <View style={styles.teamPlanTag}>
+                      <Text style={styles.teamPlanTagText}>{currentPlanLabel}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.settingsUpgradeBtn}
+                    onPress={() => setShowUpgradeModal(true)}
+                  >
+                    <Ionicons name="sparkles" size={15} color="#FFFFFF" />
+                    <Text style={styles.settingsUpgradeBtnText}>Upgrade Plan</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionTitle}>Notifications & Alerts</Text>
 
@@ -2119,9 +2114,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     )}
 
       {/* CREATE SHIFT MODAL */}
-      <Modal visible={showCreateShiftModal} transparent animationType="slide">
+      <Modal
+        visible={showCreateShiftModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCreateShiftModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowCreateShiftModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Schedule Shift</Text>
             <Text style={styles.modalSubtitle}>
               Assign a staff member and specify shift hours. Overlaps are automatically prevented.
@@ -2234,9 +2244,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       </Modal>
 
       {/* CREATE TEAM MODAL */}
-      <Modal visible={showCreateTeamModal} transparent animationType="slide">
+      <Modal
+        visible={showCreateTeamModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCreateTeamModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowCreateTeamModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Create New Team</Text>
             <Text style={styles.modalSubtitle}>
               You will become the Owner of this team and its location.
@@ -2272,9 +2297,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       </Modal>
 
       {/* INVITE TEAM MEMBER MODAL */}
-      <Modal visible={showInviteModal} transparent animationType="slide">
+      <Modal
+        visible={showInviteModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowInviteModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowInviteModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Invite Team Member</Text>
             <Text style={styles.modalSubtitle}>
               Invite by entering their email address or generate a shareable token.
@@ -2342,9 +2382,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       </Modal>
 
       {/* JOIN TEAM MODAL */}
-      <Modal visible={showJoinModal} transparent animationType="slide">
+      <Modal
+        visible={showJoinModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowJoinModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowJoinModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Join Team via Invite</Text>
             <Text style={styles.modalSubtitle}>
               Paste your invitation token or link to accept membership.
@@ -2381,9 +2436,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       </Modal>
 
       {/* REQUEST SHIFT SWAP MODAL */}
-      <Modal visible={showRequestSwapModal} transparent animationType="slide">
+      <Modal
+        visible={showRequestSwapModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRequestSwapModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowRequestSwapModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.modalTitle}>Request Shift Swap</Text>
             <Text style={styles.modalSubtitle}>
               Propose a colleague to take over this shift, or offer it to the team as an open shift.
@@ -2521,9 +2591,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
       </Modal>
 
       {/* NOTIFICATIONS MODAL */}
-      <Modal visible={showNotificationsModal} transparent animationType="slide">
+      <Modal
+        visible={showNotificationsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowNotificationsModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.notifModalCard}>
+          <TouchableWithoutFeedback
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowNotificationsModal(false);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss modal"
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <View style={styles.notifModalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.notifModalHeader}>
               <View style={styles.notifHeaderTitleRow}>
                 <Text style={styles.modalTitle}>Notifications</Text>
@@ -3041,21 +3126,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  cursorBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.primaryContainer,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-  },
-  cursorBadgeText: {
-    ...typography.labelSmall,
-    color: colors.primary,
-    fontWeight: '700',
-    fontSize: 11,
-  },
+
   activityCenterBox: {
     padding: spacing.xl,
     alignItems: 'center',
@@ -3270,6 +3341,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     padding: spacing.lg,
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   modalCard: {
     backgroundColor: '#FFFFFF',
@@ -4096,6 +4174,7 @@ const styles = StyleSheet.create({
   },
   teamHeaderInfo: {
     flex: 1,
+    flexShrink: 1,
     paddingRight: spacing.sm,
   },
   headerUpgradeBtn: {
@@ -4110,6 +4189,60 @@ const styles = StyleSheet.create({
   headerUpgradeBtnText: {
     ...typography.labelSmall,
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  teamPlanTag: {
+    backgroundColor: colors.primaryContainer,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    alignSelf: 'center',
+    flexShrink: 0,
+  },
+  teamPlanTagText: {
+    ...typography.labelSmall,
+    color: colors.primary,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  settingsPlanCard: {
+    backgroundColor: colors.surfaceContainer,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceVariant,
+  },
+  settingsPlanRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  settingsPlanTitle: {
+    ...typography.titleMedium,
+    color: colors.onSurface,
+    fontWeight: '700',
+  },
+  settingsPlanSubtitle: {
+    ...typography.bodySmall,
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  settingsUpgradeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    marginTop: spacing.md,
+  },
+  settingsUpgradeBtnText: {
+    ...typography.labelMedium,
+    color: colors.onPrimary,
     fontWeight: '700',
   },
   prefSubgroup: {

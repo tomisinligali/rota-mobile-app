@@ -32,6 +32,7 @@ import {
 import { useUiStore } from '../store/uiStore';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandLogo } from '../components/BrandLogo';
+import { UpgradePlanModal } from '../components/UpgradePlanModal';
 
 interface DashboardScreenProps {
   initialUser?: any;
@@ -110,6 +111,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
   const [processingSwapId, setProcessingSwapId] = useState<string | null>(null);
 
   // Subscription & Billing State (Seats, Tier plans, Proration)
+  const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [selectedPlanTier, setSelectedPlanTier] = useState<string>('STARTER');
   const [targetSeatCount, setTargetSeatCount] = useState<number>(5);
@@ -744,6 +746,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                 Active timezone: {selectedTeam.timezone || 'UTC'}
               </Text>
             </View>
+            {userRole === 'OWNER' && (
+              <TouchableOpacity
+                style={styles.headerUpgradeBtn}
+                onPress={() => setShowUpgradeModal(true)}
+              >
+                <Ionicons name="sparkles" size={13} color="#FFFFFF" />
+                <Text style={styles.headerUpgradeBtnText}>Upgrade Plan</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       )}
@@ -784,6 +795,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     profile.firstName,
     unreadNotifCount,
     showNotificationsModal,
+    showUpgradeModal,
     selectedTeam,
     userRole,
     activityInfiniteQuery.isError,
@@ -931,6 +943,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                   Active timezone: {selectedTeam?.timezone || 'UTC'}
                 </Text>
               </View>
+              {userRole === 'OWNER' && (
+                <TouchableOpacity
+                  style={styles.headerUpgradeBtn}
+                  onPress={() => setShowUpgradeModal(true)}
+                >
+                  <Ionicons name="sparkles" size={13} color="#FFFFFF" />
+                  <Text style={styles.headerUpgradeBtnText}>Upgrade Plan</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* If user belongs to multiple teams (backend capability preserved), show subtle selector */}
@@ -1540,12 +1561,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               {profileSubTab === 'billing' && userRole === 'OWNER' && (
                 <View style={styles.card}>
               <View style={styles.cardHeaderRow}>
-                <View>
+                <View style={{ flex: 1, paddingRight: spacing.sm }}>
                   <Text style={styles.cardTitle}>Subscription & Seat Billing</Text>
                   <Text style={styles.cardSubtitle}>
                     Seat-based pricing with automated midcycle proration.
                   </Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.headerUpgradeBtn}
+                  onPress={() => setShowUpgradeModal(true)}
+                >
+                  <Ionicons name="sparkles" size={13} color="#FFFFFF" />
+                  <Text style={styles.headerUpgradeBtnText}>Upgrade Plan</Text>
+                </TouchableOpacity>
               </View>
 
               {!subscriptionData ? (
@@ -2607,6 +2635,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
         </View>
       </Modal>
 
+      {/* UPGRADE PLAN MODAL */}
+      <UpgradePlanModal
+        visible={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        businessId={selectedTeam?.businessId}
+        currentPlanTier={subscriptionData?.planTier || 'STARTER'}
+        onSuccess={() => {
+          loadData();
+        }}
+      />
 
       {/* STICKY BOTTOM NAVIGATION BAR */}
       <View style={styles.bottomNav}>
@@ -4059,6 +4097,20 @@ const styles = StyleSheet.create({
   teamHeaderInfo: {
     flex: 1,
     paddingRight: spacing.sm,
+  },
+  headerUpgradeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    gap: 4,
+  },
+  headerUpgradeBtnText: {
+    ...typography.labelSmall,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   prefSubgroup: {
     marginTop: spacing.sm,

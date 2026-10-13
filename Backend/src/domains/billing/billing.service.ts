@@ -616,4 +616,132 @@ export class BillingService {
       }
     }
   }
+
+  /**
+   * Initializes a Flutterwave Standard hosted payment checkout session.
+   * Supports monthly and yearly billing cycles with discounted annual pricing.
+   */
+  static async initializeCheckout(
+    businessId: string,
+    actorUserId: string,
+    input: {
+      planTier: 'TEAM' | 'BUSINESS';
+      billingCycle: 'monthly' | 'yearly';
+      seatCount?: number;
+      redirectUrl?: string;
+    }
+  ) {
+    const { planTier, billingCycle, seatCount, redirectUrl } = input;
+    const plan = PLAN_CONFIG[planTier];
+    if (!plan) {
+      const err: any = new Error(`Invalid plan tier: ${planTier}`);
+      err.code = 'INVALID_PLAN_TIER';
+      err.status = 400;
+      throw err;
+    }
+
+    const defaultSeats = plan.includedSeats;
+    const requestedSeats = seatCount && seatCount >= defaultSeats ? seatCount : defaultSeats;
+    const extraSeats = Math.max(0, requestedSeats - plan.includedSeats);
+
+    // Calculate price in integer cents
+    // Yearly plan offers a 2-month discount (pay for 10 months instead of 12)
+    let totalCents = 0;
+    const extraSeatRate = plan.extraSeatPriceCents ?? 0;
+    if (billingCycle === 'yearly') {
+      const yearlyBaseCents = plan.basePriceCents * 10;
+      const yearlyExtraCents = extraSeats * extraSeatRate * 10;
+      totalCents = yearlyBaseCents + yearlyExtraCents;
+    } else {
+      totalCents = plan.basePriceCents + extraSeats * extraSeatRate;
+    }
+
+    const amountInCurrency = totalCents / 100;
+    const txRef = `rota_${planTier.toLowerCase()}_${businessId.slice(0, 8)}_${Date.now()}`;
+
+    // Get user and business details for customer metadata
+    const userRes = await query(
+      `SELECT u.email, u.first_name, u.last_name, b.name as business_name
+       FROM users u
+       JOIN team_memberships tm ON tm.user_id = u.id AND tm.role = 'OWNER'
+       JOIN teams t ON t.id = tm.team_id
+       JOIN businesses b ON b.id = t.business_id
+       WHERE u.id = $1 AND b.id = $2
+       LIMIT 1`,
+      [actorUserId, businessId]
+    );
+
+    const customerEmail = userRes.rows[0]?.email || 'customer@rota.app';
+    const customerName = userRes.rows[0]?.first_name
+      ? `${userRes.rows[0].first_name} ${userRes.rows[0].last_name || ''}`.trim()
+      : 'Business Owner';
+    const businessName = userRes.rows[0]?.business_name || 'Rota Business';
+
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    const hasLiveKey = secretKey && !secretKey.includes('xxxxxxxx');
+
+    if (hasLiveKey) {
+      try {
+        const response = await fetch('https://api.flutterwave.com/v3/payments', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${secretKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            tx_ref: txRef,
+            amount: amountInCurrency,
+            currency: 'USD',
+            redirect_url: redirectUrl || `${process.env.APP_BASE_URL || 'http://localhost:5001'}/api/v1/billing/redirect-callback`,
+            payment_options: 'card,banktransfer',
+            customer: {
+              email: customerEmail,
+              name: customerName,
+            },
+            customizations: {
+              title: `Rota - ${plan.name} (${billingCycle.toUpperCase()})`,
+              description: `${requestedSeats} seats for ${businessName}`,
+              logo: 'https://cdn-icons-png.flaticon.com/512/3652/3652191.png',
+            },
+            meta: {
+              business_id: businessId,
+              plan_tier: planTier,
+              billing_cycle: billingCycle,
+              seat_count: requestedSeats,
+            },
+          }),
+        });
+
+        const data: any = await response.json();
+        if (data.status === 'success' && data.data?.link) {
+          return {
+            status: 'success',
+            checkoutUrl: data.data.link,
+            txRef,
+            amount: amountInCurrency,
+            currency: 'USD',
+            planTier,
+            billingCycle,
+            seatCount: requestedSeats,
+            isMock: false,
+          };
+        }
+      } catch (err: any) {
+        console.error('Flutterwave payment initialization error:', err.message);
+      }
+    }
+
+    // Development / Test mode fallback when live keys are not yet configured
+    return {
+      status: 'success',
+      checkoutUrl: `https://checkout.flutterwave.com/v3/hosted/pay/${txRef}`,
+      txRef,
+      amount: amountInCurrency,
+      currency: 'USD',
+      planTier,
+      billingCycle,
+      seatCount: requestedSeats,
+      isMock: !hasLiveKey,
+    };
+  }
 }

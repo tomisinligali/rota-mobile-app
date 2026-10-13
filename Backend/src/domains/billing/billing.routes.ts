@@ -26,6 +26,13 @@ router.post(
   BillingController.updateSubscription
 );
 
+router.post(
+  '/initialize-checkout/:businessId',
+  requireAuth,
+  redisRateLimiter({ prefix: 'billing_checkout', limit: 20, windowSeconds: 60 }),
+  BillingController.initializeCheckout
+);
+
 // Flutterwave Webhook (at-least-once with provider_event_id deduplication)
 router.post(
   '/webhook',

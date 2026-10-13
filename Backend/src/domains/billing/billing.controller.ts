@@ -175,4 +175,44 @@ export class BillingController {
       });
     }
   }
+
+  static async initializeCheckout(req: Request, res: Response): Promise<void> {
+    try {
+      const user = req.user!;
+      const businessId = String(req.params.businessId);
+      const { planTier, billingCycle = 'monthly', seatCount, redirectUrl } = req.body;
+
+      const isOwner = await BillingController.verifyBusinessOwner(user.id, businessId);
+      if (!isOwner) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Only business owners can initiate subscription checkout',
+            details: {},
+          },
+        });
+        return;
+      }
+
+      const checkoutSession = await BillingService.initializeCheckout(businessId, user.id, {
+        planTier,
+        billingCycle,
+        seatCount: seatCount ? parseInt(seatCount, 10) : undefined,
+        redirectUrl,
+      });
+
+      res.status(200).json({
+        data: checkoutSession,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      res.status(err.status || 500).json({
+        error: {
+          code: err.code || 'INTERNAL_SERVER_ERROR',
+          message: err.message || 'Failed to initialize checkout',
+          details: {},
+        },
+      });
+    }
+  }
 }

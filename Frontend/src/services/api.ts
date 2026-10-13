@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   process.env.API_URL ||
-  (Platform.OS === 'web' ? 'http://localhost:5001/api/v1' : 'http://172.20.10.2:5001/api/v1');
+  (Platform.OS === 'web' ? 'http://localhost:5001/api/v1' : 'http://192.168.100.84:5001/api/v1');
 
 // Server origin for non-versioned endpoints like /health
 const SERVER_ORIGIN = BASE_URL.replace('/api/v1', '');
@@ -407,6 +407,21 @@ export const ApiService = {
     });
   },
 
+  async initializeCheckout(
+    businessId: string,
+    data: {
+      planTier: 'TEAM' | 'BUSINESS';
+      billingCycle: 'monthly' | 'yearly';
+      seatCount?: number;
+      redirectUrl?: string;
+    }
+  ): Promise<any> {
+    return await request<any>(`/billing/initialize-checkout/${businessId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   // Notifications
   async getNotifications(limit = 30): Promise<any> {
     const token = await StorageService.getToken();
@@ -470,6 +485,7 @@ export const BillingApi = {
   getSubscription: ApiService.getSubscription,
   previewProration: ApiService.previewProration,
   updateSubscription: ApiService.updateSubscription,
+  initializeCheckout: ApiService.initializeCheckout,
 };
 
 export const SwapsApi = {

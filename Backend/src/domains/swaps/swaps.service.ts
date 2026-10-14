@@ -1,5 +1,6 @@
 import { pool, query } from '../../db/pool';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CacheService } from '../../lib/cache';
 
 export interface RequestSwapInput {
   shiftId: string;
@@ -367,6 +368,7 @@ export class SwapsService {
       }
 
       await client.query('COMMIT');
+      await CacheService.invalidateTeamSchedule(teamId);
 
       return {
         swapId,

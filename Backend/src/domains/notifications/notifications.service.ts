@@ -19,11 +19,32 @@ export class NotificationsService {
     const { userId, teamId, type, title, body, data = {} } = input;
     const runner = dbClient || pool;
 
+    // Deep-linking target screen defaulting
+    const enrichedData: Record<string, unknown> = { ...data };
+    if (!enrichedData.screen) {
+      const t = (type || '').toUpperCase();
+      if (t.startsWith('SHIFT_')) {
+        enrichedData.screen = 'shifts';
+      } else if (t.startsWith('SWAP_') || t.includes('OPEN_SHIFT')) {
+        enrichedData.screen = 'swaps';
+      } else if (
+        t.startsWith('PAYMENT_') ||
+        t.startsWith('SUBSCRIPTION_') ||
+        t.startsWith('TRIAL_') ||
+        t.includes('BILLING')
+      ) {
+        enrichedData.screen = 'profile';
+        enrichedData.subTab = 'billing';
+      } else {
+        enrichedData.screen = 'feed';
+      }
+    }
+
     const notifRes = await runner.query(
       `INSERT INTO notifications (user_id, team_id, type, title, body, data)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, user_id, team_id, type, title, body, data, is_read, created_at`,
-      [userId, teamId || null, type, title, body, JSON.stringify(data)]
+      [userId, teamId || null, type, title, body, JSON.stringify(enrichedData)]
     );
 
     const notification = notifRes.rows[0];
@@ -40,9 +61,10 @@ export class NotificationsService {
       await notificationQueue.add('send-notification', {
         notificationId: notification.id,
         userId,
+        type,
         title,
         body,
-        data,
+        data: enrichedData,
       });
     } catch (err: any) {
       console.warn('BullMQ enqueue error (will be processed by durable outbox):', err.message);
@@ -52,9 +74,16 @@ export class NotificationsService {
   }
 
   /**
-   * Registers a user device push token (e.g. Expo token).
+   * Registers a user device push token.
+   * Supports multiple devices per user identified by deviceId.
    */
-  static async registerPushToken(userId: string, pushToken: string, deviceType = 'expo') {
+  static async registerPushToken(
+    userId: string,
+    pushToken: string,
+    deviceId?: string,
+    deviceType = 'expo',
+    deviceName?: string
+  ) {
     if (!pushToken || pushToken.trim().length === 0) {
       const err: any = new Error('Push token is required');
       err.code = 'VALIDATION_ERROR';
@@ -62,15 +91,66 @@ export class NotificationsService {
       throw err;
     }
 
-    await query(
-      `INSERT INTO device_push_tokens (user_id, push_token, device_type, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_id, push_token)
-       DO UPDATE SET updated_at = NOW()`,
-      [userId, pushToken.trim(), deviceType]
-    );
+    const trimmedToken = pushToken.trim();
+    const trimmedDeviceId = deviceId?.trim();
 
-    return { registered: true, pushToken: pushToken.trim() };
+    if (trimmedDeviceId) {
+      // If token belonged to another user on the same device, detach it
+      await query(
+        `DELETE FROM device_push_tokens WHERE push_token = $1 AND user_id != $2`,
+        [trimmedToken, userId]
+      );
+
+      // Upsert by user_id and device_id
+      await query(
+        `INSERT INTO device_push_tokens (user_id, push_token, device_id, device_type, device_name, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (user_id, device_id) WHERE device_id IS NOT NULL
+         DO UPDATE SET push_token = $2, device_type = $4, device_name = $5, updated_at = NOW()`,
+        [userId, trimmedToken, trimmedDeviceId, deviceType, deviceName || null]
+      );
+    } else {
+      // Fallback if client doesn't send deviceId
+      await query(
+        `INSERT INTO device_push_tokens (user_id, push_token, device_type, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (user_id, push_token)
+         DO UPDATE SET updated_at = NOW()`,
+        [userId, trimmedToken, deviceType]
+      );
+    }
+
+    return { registered: true, pushToken: trimmedToken, deviceId: trimmedDeviceId };
+  }
+
+  /**
+   * Unregisters a device push token on logout.
+   */
+  static async unregisterPushToken(userId: string, params: { deviceId?: string; pushToken?: string }) {
+    if (params.deviceId) {
+      await query(
+        `DELETE FROM device_push_tokens WHERE user_id = $1 AND device_id = $2`,
+        [userId, params.deviceId.trim()]
+      );
+    } else if (params.pushToken) {
+      await query(
+        `DELETE FROM device_push_tokens WHERE user_id = $1 AND push_token = $2`,
+        [userId, params.pushToken.trim()]
+      );
+    }
+    return { unregistered: true };
+  }
+
+  /**
+   * Deletes invalid push tokens reported by push delivery provider.
+   */
+  static async deleteInvalidPushTokens(tokens: string[]) {
+    if (!tokens || tokens.length === 0) return { deletedCount: 0 };
+    const res = await query(
+      `DELETE FROM device_push_tokens WHERE push_token = ANY($1) RETURNING push_token`,
+      [tokens]
+    );
+    return { deletedCount: res.rowCount || 0, tokens: res.rows.map((r) => r.push_token) };
   }
 
   /**

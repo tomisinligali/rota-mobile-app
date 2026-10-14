@@ -4,8 +4,9 @@ import { requireAuth } from '../../middleware/auth';
 
 const router = Router();
 
-// Device push token registration
+// Device push token registration & unregistration
 router.post('/push-token', requireAuth, NotificationsController.registerPushToken);
+router.delete('/push-token', requireAuth, NotificationsController.unregisterPushToken);
 
 // Notification feed and unread counter
 router.get('/', requireAuth, NotificationsController.getNotifications);

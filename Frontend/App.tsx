@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { SafeAreaView, StyleSheet, Linking, Alert } from 'react-native';
+import { SafeAreaView, StyleSheet, Linking, Alert, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -13,6 +13,11 @@ import { configureGoogleSignIn } from './src/services/googleAuth';
 import { ApiService } from './src/services/api';
 import { StorageService } from './src/services/storage';
 import { colors } from './src/theme/tokens';
+import {
+  registerForPushNotificationsAsync,
+  unregisterPushNotificationsAsync,
+  setupNotificationListeners,
+} from './src/services/notifications';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<
@@ -28,6 +33,18 @@ export default function App() {
   useEffect(() => {
     // Configure native Google Sign-In once at startup.
     configureGoogleSignIn();
+
+    // Configure push notification response listener (deep linking to target screens)
+    const unsubscribeNotifications = setupNotificationListeners();
+
+    // Cross-device settings coordination: refetch userSettings and team state whenever app comes to foreground
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        queryClient.invalidateQueries({ queryKey: ['userSettings'] });
+        queryClient.invalidateQueries({ queryKey: ['teams'] });
+        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      }
+    });
 
     // Handle invitation deep links (e.g. rota://invite/:token)
     const handleDeepLink = async (url: string | null) => {
@@ -67,7 +84,11 @@ export default function App() {
 
     Linking.getInitialURL().then(handleDeepLink);
     const sub = Linking.addEventListener('url', (e) => handleDeepLink(e.url));
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      appStateSub.remove();
+      unsubscribeNotifications();
+    };
   }, []);
 
   const handleSplashNavigate = (
@@ -76,6 +97,9 @@ export default function App() {
   ) => {
     if (user) {
       setCurrentUser(user);
+    }
+    if (screen === 'dashboard') {
+      registerForPushNotificationsAsync();
     }
     setCurrentScreen(screen);
   };
@@ -93,6 +117,9 @@ export default function App() {
       setCurrentScreen('verify');
       return;
     }
+
+    // Register push token for this user and device
+    registerForPushNotificationsAsync();
 
     if (pendingInvite) {
       try {
@@ -117,6 +144,8 @@ export default function App() {
   // dashboard (already a member of at least one team).
   const handleEmailVerified = async (user: any) => {
     setCurrentUser({ ...user, emailVerified: true });
+    registerForPushNotificationsAsync();
+
     if (pendingInvite) {
       try {
         await ApiService.acceptInvitation(pendingInvite.token);
@@ -137,10 +166,12 @@ export default function App() {
   };
 
   const handleOnboardingComplete = () => {
+    registerForPushNotificationsAsync();
     setCurrentScreen('dashboard');
   };
 
   const handleLogout = () => {
+    unregisterPushNotificationsAsync();
     setCurrentUser(null);
     setPendingInvite(null);
     setCurrentScreen('auth');

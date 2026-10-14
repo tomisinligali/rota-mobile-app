@@ -39,6 +39,9 @@ export function useUserSettingsQuery() {
   return useQuery({
     queryKey: queryKeys.userSettings,
     queryFn: () => ApiService.getUserSettings(),
+    staleTime: 1000 * 10,
+    refetchInterval: 1000 * 15, // Periodically syncs settings across user devices
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -134,6 +137,39 @@ export function useMarkNotificationReadMutation() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
+    },
+  });
+}
+
+/**
+ * Optimistically updates user settings while synchronizing with the server as the single source of truth.
+ */
+export function useUpdateUserSettingsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: any) => ApiService.updateUserSettings(data),
+    onMutate: async (newSettings: any) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.userSettings });
+      const previous = queryClient.getQueryData<any>(queryKeys.userSettings);
+
+      queryClient.setQueryData(queryKeys.userSettings, (old: any) => ({
+        ...(old || {}),
+        ...newSettings,
+      }));
+
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(queryKeys.userSettings, context.previous);
+      }
+    },
+    onSettled: (data) => {
+      if (data) {
+        queryClient.setQueryData(queryKeys.userSettings, data);
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.userSettings });
     },
   });
 }

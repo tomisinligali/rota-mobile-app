@@ -1,6 +1,7 @@
 import { pool, query } from '../../db/pool';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BillingService } from '../billing/billing.service';
+import { CacheService } from '../../lib/cache';
 
 export interface CreateShiftInput {
   assignedToId?: string;
@@ -128,6 +129,8 @@ export class ShiftsService {
       }
 
       await client.query('COMMIT');
+      await CacheService.invalidateTeamSchedule(teamId);
+
       return {
         id: shift.id,
         teamId: shift.team_id,
@@ -151,6 +154,12 @@ export class ShiftsService {
     teamId: string,
     options: { start?: string; end?: string; assignedToId?: string }
   ) {
+    const rangeKey = `${options.start || 'any'}_${options.end || 'any'}_${options.assignedToId || 'all'}`;
+    const cached = await CacheService.getTeamShifts(teamId, rangeKey);
+    if (cached) {
+      return cached;
+    }
+
     let queryText = `
       SELECT s.id, s.team_id, s.assigned_to_id, s.created_by_id, s.role_name,
              s.start_time, s.end_time, s.status, s.notes, s.created_at,
@@ -179,7 +188,7 @@ export class ShiftsService {
     queryText += ` ORDER BY s.start_time ASC`;
 
     const res = await query(queryText, params);
-    return res.rows.map((r) => ({
+    const shifts = res.rows.map((r) => ({
       id: r.id,
       teamId: r.team_id,
       assignedToId: r.assigned_to_id,
@@ -194,6 +203,9 @@ export class ShiftsService {
       notes: r.notes,
       createdAt: r.created_at,
     }));
+
+    await CacheService.setTeamShifts(teamId, rangeKey, shifts);
+    return shifts;
   }
 
   static async updateShift(
@@ -276,6 +288,7 @@ export class ShiftsService {
       );
 
       await client.query('COMMIT');
+      await CacheService.invalidateTeamSchedule(teamId);
 
       return {
         id: shiftId,
@@ -332,6 +345,7 @@ export class ShiftsService {
       });
     }
 
+    await CacheService.invalidateTeamSchedule(teamId);
     return { success: true };
   }
 
@@ -341,6 +355,13 @@ export class ShiftsService {
     cursor?: string
   ) {
     const safeLimit = Math.max(1, Math.min(100, limit));
+    const pageKey = `${safeLimit}_${cursor || 'first'}`;
+
+    // Check Redis Cache for Activity Feed
+    const cached = await CacheService.getActivityFeed(teamId, pageKey);
+    if (cached) {
+      return cached;
+    }
 
     // Decode cursor if provided
     let decodedCursor: { createdAt: string; id: string } | null = null;
@@ -424,7 +445,7 @@ export class ShiftsService {
           ).toString('base64url')
         : null;
 
-    return {
+    const feedResult = {
       items,
       pagination: {
         limit: safeLimit,
@@ -432,5 +453,8 @@ export class ShiftsService {
         hasMore,
       },
     };
+
+    await CacheService.setActivityFeed(teamId, pageKey, feedResult);
+    return feedResult;
   }
 }

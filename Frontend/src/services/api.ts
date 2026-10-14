@@ -447,10 +447,25 @@ export const ApiService = {
     };
   },
 
-  async registerPushToken(pushToken: string, deviceType = 'expo'): Promise<any> {
+  async registerPushToken(
+    pushToken: string,
+    options?: { deviceId?: string; deviceType?: string; deviceName?: string }
+  ): Promise<any> {
     return await request<any>('/notifications/push-token', {
       method: 'POST',
-      body: JSON.stringify({ pushToken, deviceType }),
+      body: JSON.stringify({
+        pushToken,
+        deviceId: options?.deviceId,
+        deviceType: options?.deviceType || 'expo',
+        deviceName: options?.deviceName,
+      }),
+    });
+  },
+
+  async unregisterPushToken(options: { deviceId?: string; pushToken?: string }): Promise<any> {
+    return await request<any>('/notifications/push-token', {
+      method: 'DELETE',
+      body: JSON.stringify(options),
     });
   },
 

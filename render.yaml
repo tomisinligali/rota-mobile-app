@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: rota-api
+    env: node
+    rootDir: Backend
+    buildCommand: npm install && npm run build && npm run migrate
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5001
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rota-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: rota-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: rota-postgres
+    databaseName: rota_prod
+    user: rota_admin
+    plan: standard
+
+  - name: rota-redis
+    plan: standard
+    ipAllowList: []

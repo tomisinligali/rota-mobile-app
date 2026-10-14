@@ -1,5 +1,6 @@
 import { pool, query } from '../../db/pool';
 import { Role } from '../../middleware/rbac';
+import { CacheService } from '../../lib/cache';
 
 export interface CreateTeamInput {
   name: string;
@@ -135,6 +136,11 @@ export class TeamsService {
   }
 
   static async getTeamMembers(teamId: string) {
+    const cached = await CacheService.getTeamRoster(teamId);
+    if (cached) {
+      return cached;
+    }
+
     const res = await query(
       `SELECT tm.id as membership_id, tm.role, tm.status, tm.joined_at, tm.deactivated_at,
               u.id as user_id, u.email, u.first_name, u.last_name
@@ -151,7 +157,7 @@ export class TeamsService {
       [teamId]
     );
 
-    return res.rows.map((r) => ({
+    const roster = res.rows.map((r) => ({
       membershipId: r.membership_id,
       userId: r.user_id,
       email: r.email,
@@ -162,6 +168,9 @@ export class TeamsService {
       joinedAt: r.joined_at,
       deactivatedAt: r.deactivated_at,
     }));
+
+    await CacheService.setTeamRoster(teamId, roster);
+    return roster;
   }
 
   static async updateMemberRole(
@@ -206,6 +215,7 @@ export class TeamsService {
     }
 
     await query(`UPDATE team_memberships SET role = $1 WHERE id = $2`, [newRole, membershipId]);
+    await CacheService.invalidateTeamRoster(teamId);
 
     return {
       membershipId,
@@ -249,6 +259,7 @@ export class TeamsService {
       `UPDATE team_memberships SET status = 'INACTIVE', deactivated_at = NOW() WHERE id = $1`,
       [membershipId]
     );
+    await CacheService.invalidateTeamRoster(teamId);
 
     return { success: true };
   }

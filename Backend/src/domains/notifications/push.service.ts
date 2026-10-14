@@ -7,29 +7,35 @@ export interface PushMessagePayload {
   priority?: 'default' | 'normal' | 'high';
 }
 
+export interface PushSendResult {
+  success: boolean;
+  sentCount: number;
+  invalidTokens: string[];
+  error?: string;
+}
+
 export class PushService {
   /**
    * Dispatches push notification to Expo's Push API endpoint.
+   * Detects invalid/unregistered device tokens so they can be deleted immediately.
    */
-  static async sendPushNotification(payload: PushMessagePayload): Promise<boolean> {
+  static async sendPushNotification(payload: PushMessagePayload): Promise<PushSendResult> {
+    const tokens = Array.isArray(payload.to) ? payload.to : [payload.to];
+    const filteredTokens = tokens.filter((t) => typeof t === 'string' && t.trim().length > 0);
+
+    if (filteredTokens.length === 0) {
+      return { success: true, sentCount: 0, invalidTokens: [] };
+    }
+
     try {
-      const messages = Array.isArray(payload.to)
-        ? payload.to.map((token) => ({
-            to: token,
-            sound: 'default',
-            title: payload.title,
-            body: payload.body,
-            data: payload.data || {},
-          }))
-        : [
-            {
-              to: payload.to,
-              sound: 'default',
-              title: payload.title,
-              body: payload.body,
-              data: payload.data || {},
-            },
-          ];
+      const messages = filteredTokens.map((token) => ({
+        to: token,
+        sound: payload.sound !== undefined ? payload.sound : 'default',
+        title: payload.title,
+        body: payload.body,
+        data: payload.data || {},
+        priority: payload.priority || 'high',
+      }));
 
       const response = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
@@ -42,15 +48,56 @@ export class PushService {
       });
 
       if (!response.ok) {
-        console.warn(`Expo push service responded with status ${response.status}`);
-        return false;
+        const errorText = await response.text();
+        console.warn(`Expo push service responded with status ${response.status}:`, errorText);
+        return {
+          success: false,
+          sentCount: 0,
+          invalidTokens: [],
+          error: `HTTP ${response.status}: ${errorText}`,
+        };
       }
 
       const json = await response.json();
-      return json?.data?.[0]?.status === 'ok';
+      const invalidTokens: string[] = [];
+      let sentCount = 0;
+
+      if (json && Array.isArray(json.data)) {
+        json.data.forEach((ticket: any, index: number) => {
+          const token = filteredTokens[index];
+          if (ticket.status === 'ok') {
+            sentCount++;
+          } else if (ticket.status === 'error') {
+            const errCode = ticket.details?.error;
+            const errMsg = ticket.message || '';
+            // DeviceNotRegistered or InvalidCredentials indicates the token is no longer valid
+            if (
+              errCode === 'DeviceNotRegistered' ||
+              errCode === 'InvalidCredentials' ||
+              errMsg.toLowerCase().includes('devicenotregistered') ||
+              errMsg.toLowerCase().includes('not a registered push notification recipient')
+            ) {
+              if (token) {
+                invalidTokens.push(token);
+              }
+            }
+          }
+        });
+      }
+
+      return {
+        success: sentCount > 0 || invalidTokens.length > 0,
+        sentCount,
+        invalidTokens,
+      };
     } catch (err: any) {
       console.error('Error dispatching push notification:', err.message);
-      return false;
+      return {
+        success: false,
+        sentCount: 0,
+        invalidTokens: [],
+        error: err.message,
+      };
     }
   }
 }

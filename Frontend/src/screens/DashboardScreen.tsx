@@ -25,6 +25,7 @@ import {
   useTeamsQuery,
   useNotificationsQuery,
   useUserSettingsQuery,
+  useUpdateUserSettingsMutation,
   useTeamMembersQuery,
   useTeamShiftsQuery,
   useTeamActivityInfiniteQuery,
@@ -36,6 +37,7 @@ import { useUiStore } from '../store/uiStore';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandLogo } from '../components/BrandLogo';
 import { UpgradePlanModal } from '../components/UpgradePlanModal';
+import { handleNotificationDeepLink, registerForPushNotificationsAsync } from '../services/notifications';
 
 interface DashboardScreenProps {
   initialUser?: any;
@@ -183,6 +185,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     activityInfiniteQuery.isLoading,
     activityInfiniteQuery.fetchNextPage,
   ]);
+
+  // Register push notifications on dashboard mount if not already done
+  useEffect(() => {
+    registerForPushNotificationsAsync();
+  }, []);
 
   // Mirror cached query data into the existing render state.
   useEffect(() => {
@@ -628,6 +635,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     markNotificationRead.mutate(id);
   };
 
+  const handleNotificationItemPress = (item: any) => {
+    handleMarkNotifRead(item.id);
+    setShowNotificationsModal(false);
+    if (item.data) {
+      handleNotificationDeepLink(item.data);
+    }
+  };
+
   const handleMarkAllNotifsRead = async () => {
     try {
       await ApiService.markAllNotificationsAsRead();
@@ -638,28 +653,101 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
     }
   };
 
+  const updateSettingsMutation = useUpdateUserSettingsMutation();
+
   const handleToggleSetting = async (key: string, currentValue: any) => {
     if (!userSettings) return;
+    const previous = { ...userSettings };
     const newVal = typeof currentValue === 'boolean' ? !currentValue : currentValue;
     const updated = { ...userSettings, [key]: newVal };
     setUserSettings(updated);
     await StorageService.cacheUserSettings(updated);
     try {
-      await ApiService.updateUserSettings({ [key]: newVal });
-    } catch {
-      // Revert if network error
+      await updateSettingsMutation.mutateAsync({ [key]: newVal });
+    } catch (err: any) {
+      setUserSettings(previous);
+      await StorageService.cacheUserSettings(previous);
+      Alert.alert('Update Failed', err?.message || 'Could not update setting. Reverted to previous value.');
     }
   };
 
   const handleSetStartDayOfWeek = async (day: number) => {
     if (!userSettings) return;
+    const previous = { ...userSettings };
     const updated = { ...userSettings, startDayOfWeek: day };
     setUserSettings(updated);
     await StorageService.cacheUserSettings(updated);
     try {
-      await ApiService.updateUserSettings({ startDayOfWeek: day });
-    } catch {
-      // Revert if network error
+      await updateSettingsMutation.mutateAsync({ startDayOfWeek: day });
+    } catch (err: any) {
+      setUserSettings(previous);
+      await StorageService.cacheUserSettings(previous);
+      Alert.alert('Update Failed', err?.message || 'Could not update calendar start day.');
+    }
+  };
+
+  const handleSetQuietHoursWindow = async (start: string, end: string) => {
+    if (!userSettings) return;
+    const previous = { ...userSettings };
+    const updated = { ...userSettings, quietHoursStart: start, quietHoursEnd: end };
+    setUserSettings(updated);
+    await StorageService.cacheUserSettings(updated);
+    try {
+      await updateSettingsMutation.mutateAsync({ quietHoursStart: start, quietHoursEnd: end });
+    } catch (err: any) {
+      setUserSettings(previous);
+      await StorageService.cacheUserSettings(previous);
+      Alert.alert('Update Failed', err.message || 'Could not update quiet hours window.');
+    }
+  };
+
+  const handleSyncTimezone = async () => {
+    try {
+      const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const previous = { ...userSettings };
+      const updated = { ...userSettings, timezone: deviceTz };
+      setUserSettings(updated);
+      await StorageService.cacheUserSettings(updated);
+      try {
+        await updateSettingsMutation.mutateAsync({ timezone: deviceTz });
+        Alert.alert('Timezone Synced', `Server quiet hours timezone coordinated to ${deviceTz}.`);
+      } catch (err: any) {
+        setUserSettings(previous);
+        await StorageService.cacheUserSettings(previous);
+        Alert.alert('Sync Error', err.message || 'Could not sync timezone.');
+      }
+    } catch (err: any) {
+      Alert.alert('Sync Error', err?.message || 'Could not detect device timezone.');
+    }
+  };
+
+  const handleSetTheme = async (theme: 'SYSTEM' | 'LIGHT' | 'DARK') => {
+    if (!userSettings) return;
+    const previous = { ...userSettings };
+    const updated = { ...userSettings, theme };
+    setUserSettings(updated);
+    await StorageService.cacheUserSettings(updated);
+    try {
+      await updateSettingsMutation.mutateAsync({ theme });
+    } catch (err: any) {
+      setUserSettings(previous);
+      await StorageService.cacheUserSettings(previous);
+      Alert.alert('Update Failed', err?.message || 'Could not update theme.');
+    }
+  };
+
+  const handleSetLanguage = async (language: string) => {
+    if (!userSettings) return;
+    const previous = { ...userSettings };
+    const updated = { ...userSettings, language };
+    setUserSettings(updated);
+    await StorageService.cacheUserSettings(updated);
+    try {
+      await updateSettingsMutation.mutateAsync({ language });
+    } catch (err: any) {
+      setUserSettings(previous);
+      await StorageService.cacheUserSettings(previous);
+      Alert.alert('Update Failed', err?.message || 'Could not update language.');
     }
   };
 
@@ -1849,11 +1937,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
               <View style={styles.settingsSection}>
                 <Text style={styles.settingsSectionTitle}>Notifications & Alerts</Text>
 
+                {/* Master Push Switch */}
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
                     <Text style={styles.settingLabel}>Push Notifications</Text>
                     <Text style={styles.settingDesc}>
-                      Receive push alerts on your mobile device for shift and swap updates.
+                      Master switch for mobile push alerts across all linked devices.
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -1883,11 +1972,117 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                   </TouchableOpacity>
                 </View>
 
+                {/* Group 1: Shift Changes */}
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Email Notifications</Text>
+                    <Text style={styles.settingLabel}>Shift Changes</Text>
                     <Text style={styles.settingDesc}>
-                      Receive digest emails for weekly schedule publications.
+                      Alerts when shifts are scheduled, modified, cancelled, or published.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleBtn,
+                      (userSettings?.notifyShiftChanges ?? true)
+                        ? styles.toggleBtnActive
+                        : styles.toggleBtnInactive,
+                    ]}
+                    onPress={() =>
+                      handleToggleSetting(
+                        'notifyShiftChanges',
+                        userSettings?.notifyShiftChanges ?? true
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.toggleBtnText,
+                        (userSettings?.notifyShiftChanges ?? true)
+                          ? styles.toggleBtnTextActive
+                          : styles.toggleBtnTextInactive,
+                      ]}
+                    >
+                      {(userSettings?.notifyShiftChanges ?? true) ? 'ON' : 'OFF'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Group 2: Swaps & Open Shifts */}
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Swaps & Open Shifts</Text>
+                    <Text style={styles.settingDesc}>
+                      Alerts when colleagues offer or request swaps and when managers review them.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleBtn,
+                      (userSettings?.notifySwaps ?? true)
+                        ? styles.toggleBtnActive
+                        : styles.toggleBtnInactive,
+                    ]}
+                    onPress={() =>
+                      handleToggleSetting(
+                        'notifySwaps',
+                        userSettings?.notifySwaps ?? true
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.toggleBtnText,
+                        (userSettings?.notifySwaps ?? true)
+                          ? styles.toggleBtnTextActive
+                          : styles.toggleBtnTextInactive,
+                      ]}
+                    >
+                      {(userSettings?.notifySwaps ?? true) ? 'ON' : 'OFF'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Group 3: Billing & Subscriptions */}
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Billing & Invoices</Text>
+                    <Text style={styles.settingDesc}>
+                      Receipts, payment warnings, trial milestones, and seat count changes.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleBtn,
+                      (userSettings?.notifyBilling ?? true)
+                        ? styles.toggleBtnActive
+                        : styles.toggleBtnInactive,
+                    ]}
+                    onPress={() =>
+                      handleToggleSetting(
+                        'notifyBilling',
+                        userSettings?.notifyBilling ?? true
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.toggleBtnText,
+                        (userSettings?.notifyBilling ?? true)
+                          ? styles.toggleBtnTextActive
+                          : styles.toggleBtnTextInactive,
+                      ]}
+                    >
+                      {(userSettings?.notifyBilling ?? true) ? 'ON' : 'OFF'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Email Digests */}
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Email Digests</Text>
+                    <Text style={styles.settingDesc}>
+                      Receive summary emails for weekly published rosters.
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -1916,74 +2111,142 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     </Text>
                   </TouchableOpacity>
                 </View>
+              </View>
 
-                <View style={styles.settingRow}>
+              {/* Quiet Hours Section */}
+              <View style={styles.settingsSection}>
+                <View style={styles.settingsSectionHeaderRow}>
+                  <Text style={styles.settingsSectionTitle}>Quiet Hours & Sleep Protection</Text>
+                  <View style={styles.serverSyncBadge}>
+                    <Ionicons name="cloud-done-outline" size={13} color={colors.primary} />
+                    <Text style={styles.serverSyncBadgeText}>Server Enforced</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.settingDesc}>
+                  Non-urgent notifications (shift proposals, swaps, updates) are held safely on the server and delivered when your quiet window ends.
+                </Text>
+
+                <View style={[styles.settingRow, { marginTop: spacing.sm }]}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Shift Reminders</Text>
+                    <Text style={styles.settingLabel}>Enable Quiet Hours</Text>
                     <Text style={styles.settingDesc}>
-                      Get reminded 2 hours before your upcoming scheduled shifts.
+                      {userSettings?.quietHoursEnabled
+                        ? `Active: ${userSettings?.quietHoursStart || '22:00'} to ${userSettings?.quietHoursEnd || '06:00'} (${userSettings?.timezone || 'Local'})`
+                        : 'Currently disabled. Notifications deliver immediately 24/7.'}
                     </Text>
                   </View>
                   <TouchableOpacity
                     style={[
                       styles.toggleBtn,
-                      (userSettings?.shiftReminders ?? true)
+                      (userSettings?.quietHoursEnabled ?? false)
                         ? styles.toggleBtnActive
                         : styles.toggleBtnInactive,
                     ]}
                     onPress={() =>
                       handleToggleSetting(
-                        'shiftReminders',
-                        userSettings?.shiftReminders ?? true
+                        'quietHoursEnabled',
+                        userSettings?.quietHoursEnabled ?? false
                       )
                     }
                   >
                     <Text
                       style={[
                         styles.toggleBtnText,
-                        (userSettings?.shiftReminders ?? true)
+                        (userSettings?.quietHoursEnabled ?? false)
                           ? styles.toggleBtnTextActive
                           : styles.toggleBtnTextInactive,
                       ]}
                     >
-                      {(userSettings?.shiftReminders ?? true) ? 'ON' : 'OFF'}
+                      {(userSettings?.quietHoursEnabled ?? false) ? 'ON' : 'OFF'}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.settingRow}>
-                  <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Swap & Open Shift Alerts</Text>
-                    <Text style={styles.settingDesc}>
-                      Instant notifications when a colleague offers or requests a shift swap.
-                    </Text>
+                {userSettings?.quietHoursEnabled && (
+                  <View style={styles.quietHoursConfigCard}>
+                    <Text style={styles.quietHoursPresetTitle}>Select Quiet Hours Window:</Text>
+                    <View style={styles.quietHoursPresetRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.quietPresetBtn,
+                          userSettings?.quietHoursStart === '22:00' && userSettings?.quietHoursEnd === '06:00' && styles.quietPresetBtnActive,
+                        ]}
+                        onPress={() => handleSetQuietHoursWindow('22:00', '06:00')}
+                      >
+                        <Text
+                          style={[
+                            styles.quietPresetBtnText,
+                            userSettings?.quietHoursStart === '22:00' && userSettings?.quietHoursEnd === '06:00' && styles.quietPresetBtnTextActive,
+                          ]}
+                        >
+                          10 PM – 6 AM
+                        </Text>
+                        <Text style={styles.quietPresetSubtext}>Nurse Standard</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.quietPresetBtn,
+                          userSettings?.quietHoursStart === '23:00' && userSettings?.quietHoursEnd === '07:00' && styles.quietPresetBtnActive,
+                        ]}
+                        onPress={() => handleSetQuietHoursWindow('23:00', '07:00')}
+                      >
+                        <Text
+                          style={[
+                            styles.quietPresetBtnText,
+                            userSettings?.quietHoursStart === '23:00' && userSettings?.quietHoursEnd === '07:00' && styles.quietPresetBtnTextActive,
+                          ]}
+                        >
+                          11 PM – 7 AM
+                        </Text>
+                        <Text style={styles.quietPresetSubtext}>Late Night</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.quietPresetBtn,
+                          userSettings?.quietHoursStart === '22:00' && userSettings?.quietHoursEnd === '08:00' && styles.quietPresetBtnActive,
+                        ]}
+                        onPress={() => handleSetQuietHoursWindow('22:00', '08:00')}
+                      >
+                        <Text
+                          style={[
+                            styles.quietPresetBtnText,
+                            userSettings?.quietHoursStart === '22:00' && userSettings?.quietHoursEnd === '08:00' && styles.quietPresetBtnTextActive,
+                          ]}
+                        >
+                          10 PM – 8 AM
+                        </Text>
+                        <Text style={styles.quietPresetSubtext}>Extended Rest</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Server Timezone Coordination */}
+                    <View style={styles.timezoneCoordinationBox}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.timezoneCoordinationTitle}>Enforced Timezone</Text>
+                        <Text style={styles.timezoneCoordinationValue}>
+                          {userSettings?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.syncTimezoneBtn}
+                        onPress={handleSyncTimezone}
+                      >
+                        <Ionicons name="refresh" size={14} color={colors.primary} />
+                        <Text style={styles.syncTimezoneBtnText}>Sync Device TZ</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.quietHoursExplainer}>
+                      <Ionicons name="shield-checkmark" size={16} color={colors.primary} style={{ marginRight: 6 }} />
+                      <Text style={styles.quietHoursExplainerText}>
+                        Synced to server: All your devices (phone & tablet) will remain quiet between {userSettings?.quietHoursStart || '22:00'} and {userSettings?.quietHoursEnd || '06:00'}.
+                      </Text>
+                    </View>
                   </View>
-                  <TouchableOpacity
-                    style={[
-                      styles.toggleBtn,
-                      (userSettings?.swapAlerts ?? true)
-                        ? styles.toggleBtnActive
-                        : styles.toggleBtnInactive,
-                    ]}
-                    onPress={() =>
-                      handleToggleSetting(
-                        'swapAlerts',
-                        userSettings?.swapAlerts ?? true
-                      )
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.toggleBtnText,
-                        (userSettings?.swapAlerts ?? true)
-                          ? styles.toggleBtnTextActive
-                          : styles.toggleBtnTextInactive,
-                      ]}
-                    >
-                      {(userSettings?.swapAlerts ?? true) ? 'ON' : 'OFF'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                )}
               </View>
 
               <View style={styles.settingsSection}>
@@ -2063,6 +2326,96 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     </Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>Appearance & Language</Text>
+
+                <View style={styles.prefSubgroup}>
+                  <Text style={styles.prefSubgroupLabel}>Application Theme</Text>
+                  <Text style={styles.settingDesc}>
+                    Choose how Rota displays across your devices:
+                  </Text>
+                  <View style={styles.daySelectorRow}>
+                    {[
+                      { key: 'SYSTEM', label: 'System', icon: 'phone-portrait-outline', activeIcon: 'phone-portrait' },
+                      { key: 'LIGHT', label: 'Light', icon: 'sunny-outline', activeIcon: 'sunny' },
+                      { key: 'DARK', label: 'Dark', icon: 'moon-outline', activeIcon: 'moon' },
+                    ].map((t) => {
+                      const isActive = (userSettings?.theme || 'SYSTEM') === t.key;
+                      return (
+                        <TouchableOpacity
+                          key={t.key}
+                          style={[
+                            styles.daySelectorBtn,
+                            isActive && styles.daySelectorBtnActive,
+                            { flexDirection: 'row', justifyContent: 'center', gap: 6 },
+                          ]}
+                          onPress={() => handleSetTheme(t.key as any)}
+                        >
+                          <Ionicons
+                            name={isActive ? (t.activeIcon as any) : (t.icon as any)}
+                            size={16}
+                            color={isActive ? colors.primary : colors.onSurfaceVariant}
+                          />
+                          <Text
+                            style={[
+                              styles.daySelectorBtnText,
+                              isActive && styles.daySelectorBtnTextActive,
+                            ]}
+                          >
+                            {t.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={[styles.prefSubgroup, { marginTop: spacing.md }]}>
+                  <Text style={styles.prefSubgroupLabel}>Display Language</Text>
+                  <Text style={styles.settingDesc}>
+                    Select your preferred interface language:
+                  </Text>
+                  <View style={styles.daySelectorRow}>
+                    {[
+                      { code: 'en', label: 'English' },
+                      { code: 'fr', label: 'Français' },
+                      { code: 'es', label: 'Español' },
+                      { code: 'de', label: 'Deutsch' },
+                    ].map((lang) => {
+                      const isActive = (userSettings?.language || 'en') === lang.code;
+                      return (
+                        <TouchableOpacity
+                          key={lang.code}
+                          style={[
+                            styles.daySelectorBtn,
+                            isActive && styles.daySelectorBtnActive,
+                          ]}
+                          onPress={() => handleSetLanguage(lang.code)}
+                        >
+                          <Text
+                            style={[
+                              styles.daySelectorBtnText,
+                              isActive && styles.daySelectorBtnTextActive,
+                            ]}
+                          >
+                            {lang.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {userSettings?.updatedAt && (
+                  <View style={[styles.quietHoursExplainer, { marginTop: spacing.md }]}>
+                    <Ionicons name="cloud-done-outline" size={16} color={colors.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.quietHoursExplainerText}>
+                      Server synced: Last updated {new Date(userSettings.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.settingsSection}>
@@ -2709,7 +3062,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ initialUser, o
                     <TouchableOpacity
                       key={item.id}
                       style={[styles.notifItem, isUnread && styles.notifItemUnread]}
-                      onPress={() => handleMarkNotifRead(item.id)}
+                      onPress={() => handleNotificationItemPress(item)}
                       activeOpacity={0.7}
                     >
                       <View style={styles.notifItemIconContainer}>
@@ -4033,6 +4386,121 @@ const styles = StyleSheet.create({
   },
   toggleBtnInactive: {
     backgroundColor: colors.surfaceContainerHighest,
+  },
+  settingsSectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  serverSyncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primaryContainer,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  serverSyncBadgeText: {
+    ...typography.labelSmall,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  quietHoursConfigCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surfaceContainer,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  quietHoursPresetTitle: {
+    ...typography.labelMedium,
+    color: colors.onSurface,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+  },
+  quietHoursPresetRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  quietPresetBtn: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  quietPresetBtnActive: {
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primary,
+  },
+  quietPresetBtnText: {
+    ...typography.labelSmall,
+    color: colors.onSurface,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  quietPresetBtnTextActive: {
+    color: colors.onPrimaryContainer,
+  },
+  quietPresetSubtext: {
+    fontSize: 10,
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  timezoneCoordinationBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  timezoneCoordinationTitle: {
+    ...typography.labelSmall,
+    color: colors.onSurfaceVariant,
+  },
+  timezoneCoordinationValue: {
+    ...typography.bodySmall,
+    color: colors.onSurface,
+    fontWeight: '600',
+  },
+  syncTimezoneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surfaceContainerHighest,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+  },
+  syncTimezoneBtnText: {
+    ...typography.labelSmall,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  quietHoursExplainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  quietHoursExplainerText: {
+    ...typography.bodySmall,
+    color: colors.onPrimaryContainer,
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 15,
   },
   toggleBtnText: {
     ...typography.labelSmall,

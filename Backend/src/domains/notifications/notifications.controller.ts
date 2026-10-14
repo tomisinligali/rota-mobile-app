@@ -5,9 +5,15 @@ export class NotificationsController {
   static async registerPushToken(req: Request, res: Response): Promise<void> {
     try {
       const user = req.user!;
-      const { pushToken, deviceType } = req.body;
+      const { pushToken, deviceId, deviceType, deviceName } = req.body;
 
-      const result = await NotificationsService.registerPushToken(user.id, pushToken, deviceType);
+      const result = await NotificationsService.registerPushToken(
+        user.id,
+        pushToken,
+        deviceId,
+        deviceType,
+        deviceName
+      );
       res.status(200).json({
         data: result,
         meta: { timestamp: new Date().toISOString() },
@@ -17,6 +23,27 @@ export class NotificationsController {
         error: {
           code: err.code || 'INTERNAL_SERVER_ERROR',
           message: err.message || 'Failed to register push token',
+          details: {},
+        },
+      });
+    }
+  }
+
+  static async unregisterPushToken(req: Request, res: Response): Promise<void> {
+    try {
+      const user = req.user!;
+      const { deviceId, pushToken } = req.body;
+
+      const result = await NotificationsService.unregisterPushToken(user.id, { deviceId, pushToken });
+      res.status(200).json({
+        data: result,
+        meta: { timestamp: new Date().toISOString() },
+      });
+    } catch (err: any) {
+      res.status(err.status || 500).json({
+        error: {
+          code: err.code || 'INTERNAL_SERVER_ERROR',
+          message: err.message || 'Failed to unregister push token',
           details: {},
         },
       });
